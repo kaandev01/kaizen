@@ -1,5 +1,5 @@
 import { normalizeReminders } from './reminders';
-import type { AgendaKind, PomodoroConfig, Schedule } from './types';
+import type { AgendaImportance, AgendaKind, AgendaReminder, PomodoroConfig, Schedule } from './types';
 
 export const MAX_TARGET = 100_000;
 export const MAX_AMOUNT = 999_999;
@@ -76,15 +76,42 @@ export interface AgendaInput {
   date: string;
   time: string | null;
   description: string;
-  reminder: string | null;
+  importance: AgendaImportance;
+  reminders: AgendaReminder[];
+  reminderAnchorTime: string | null;
 }
+
+const isValidTime = (t: string) => /^([01]\d|2[0-3]):[0-5]\d$/.test(t);
 
 export function validateAgendaInput(i: AgendaInput): string | null {
   if (!i.title.trim()) return 'Bir başlık gir.';
   if (i.title.trim().length > MAX_TITLE_LEN) return `Başlık en fazla ${MAX_TITLE_LEN} karakter olabilir.`;
   if (!i.date) return 'Bir tarih seç.';
   if (i.description.length > MAX_DESCRIPTION_LEN) return `Açıklama en fazla ${MAX_DESCRIPTION_LEN} karakter olabilir.`;
+  // Tüm günlük bir kayıtta offset tabanlı (custom olmayan) hatırlatma varsa, kullanıcı
+  // açıkça bir saat seçmiş olmalı — gizlice gece yarısı kabul edilmez.
+  if (!i.time && !i.reminderAnchorTime && i.reminders.some((r) => r.kind !== 'custom')) {
+    return 'Tüm günlük kayıtta hatırlatma için bir saat seç.';
+  }
+  for (const r of i.reminders) {
+    if (r.kind === 'custom' && (!r.customDate || !r.customTime || !isValidTime(r.customTime))) {
+      return 'Özel hatırlatma için tarih ve saat gir.';
+    }
+  }
   return null;
+}
+
+/** Aynı türde birden fazla hatırlatma eklenmesin (ör. iki kez "1 gün önce"); özel olanlar kendi tarih/saatine göre tekilleşir. */
+export function normalizeAgendaReminders(reminders: AgendaReminder[]): AgendaReminder[] {
+  const seen = new Set<string>();
+  const out: AgendaReminder[] = [];
+  for (const r of reminders) {
+    const key = r.kind === 'custom' ? `custom:${r.customDate}:${r.customTime}` : r.kind;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(r);
+  }
+  return out;
 }
 
 // ---- hedefler (aylık/yıllık) -------------------------------------------------

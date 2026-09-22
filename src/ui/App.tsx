@@ -5,7 +5,7 @@ import { CalendarScreen } from './CalendarScreen';
 import { Icon } from './components';
 import { FocusScreen } from './FocusScreen';
 import { useAppState, useStore } from './hooks';
-import { setNavigate, type Tab } from './nav';
+import { goToAgendaItem, setNavigate, type Tab } from './nav';
 import { beep, cancelPomodoroEnd, haptic, schedulePomodoroEnd, setWakeLock, showNotification } from './platform';
 import { SettingsScreen } from './SettingsScreen';
 import { TodayScreen } from './TodayScreen';
@@ -13,6 +13,8 @@ import { TodayScreen } from './TodayScreen';
 interface Notice {
   text: string;
   tab?: Tab;
+  /** "Aç" bu kayda dokununca ilgili ajanda kaydını doğrudan açsın diye. */
+  agendaTarget?: { date: string; itemId: string };
 }
 
 const TABS: { id: Tab; label: string; icon: 'today' | 'hourglass' | 'calendar' }[] = [
@@ -121,7 +123,9 @@ export function App() {
         if (fired.has(r.id)) continue;
         fired.add(r.id);
         const text = `${r.title} zamanı`;
-        if (document.visibilityState === 'visible') say({ text, tab: 'calendar' });
+        const item = store.getState().agenda.find((a) => a.id === r.itemId);
+        const agendaTarget = item ? { date: item.date, itemId: item.id } : undefined;
+        if (document.visibilityState === 'visible') say({ text, tab: 'calendar', agendaTarget });
         else void showNotification('Kaizen', text, `agenda:${r.itemId}:${r.at}`);
       }
     };
@@ -141,7 +145,14 @@ export function App() {
         <div class="notice banner" role="status">
           <span>{notice.text}</span>
           {notice.tab && notice.tab !== tab && (
-            <button class="toast-btn" onClick={() => (setTab(notice.tab!), setNotice(null))}>
+            <button
+              class="toast-btn"
+              onClick={() => {
+                if (notice.agendaTarget) goToAgendaItem(notice.agendaTarget.date, notice.agendaTarget.itemId);
+                else setTab(notice.tab!);
+                setNotice(null);
+              }}
+            >
               Aç
             </button>
           )}
