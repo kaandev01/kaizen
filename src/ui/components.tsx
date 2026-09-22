@@ -58,7 +58,7 @@ export function Sheet(props: {
   onClose: () => void;
   children: ComponentChildren;
   closeLabel?: string;
-  action?: { label: string; onClick: () => void };
+  action?: { label: string; onClick: () => void; disabled?: boolean };
   tall?: boolean;
 }) {
   const ref = useRef<HTMLDivElement>(null);
@@ -85,7 +85,7 @@ export function Sheet(props: {
           </button>
           <h2>{props.title}</h2>
           {props.action ? (
-            <button class="text-btn strong" onClick={props.action.onClick}>
+            <button class="text-btn strong" disabled={props.action.disabled} onClick={props.action.onClick}>
               {props.action.label}
             </button>
           ) : (

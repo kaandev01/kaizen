@@ -1,11 +1,12 @@
-import { useState } from 'preact/hooks';
+import { useRef, useState } from 'preact/hooks';
+import { REMINDER_OFFSET_LABEL, reminderPreview } from '../core/agenda';
 import type { DateKey } from '../core/dates';
-import { isValidTime } from '../core/reminders';
-import type { AgendaItem, AgendaKind } from '../core/types';
+import type { AgendaImportance, AgendaItem, AgendaKind, AgendaReminder, ReminderOffsetKind } from '../core/types';
 import { validateAgendaInput, type AgendaInput } from '../core/validation';
 import { ConfirmDialog, Icon, Segmented, Sheet, Switch } from './components';
 import { useStore } from './hooks';
-import { cancelAgendaNotifications } from './platform';
+import { cancelAgendaNotifications, notificationState, requestNotificationPermission, type PermState } from './platform';
+import { PermissionNote } from './HabitEditor';
 
 const KIND_OPTIONS: { value: AgendaKind; label: string }[] = [
   { value: 'deadline', label: 'Teslim' },
@@ -13,19 +14,40 @@ const KIND_OPTIONS: { value: AgendaKind; label: string }[] = [
   { value: 'todo', label: 'Yapılacak' },
   { value: 'other', label: 'Diğer' },
 ];
+const IMPORTANCE_OPTIONS: { value: AgendaImportance; label: string }[] = [
+  { value: 'normal', label: 'Normal' },
+  { value: 'important', label: 'Önemli' },
+  { value: 'critical', label: 'Kritik' },
+];
+const TOGGLE_KINDS: Exclude<ReminderOffsetKind, 'custom'>[] = ['1w', '1d', '1h', 'exact'];
 
-export function AgendaEditor({ item, defaultDate, onClose }: { item?: AgendaItem; defaultDate: DateKey; onClose: () => void }) {
+export function AgendaEditor({ item, defaultDate, onClose, onSaved }: { item?: AgendaItem; defaultDate: DateKey; onClose: () => void; onSaved?: (item: AgendaItem) => void }) {
   const store = useStore();
   const [title, setTitle] = useState(item?.title ?? '');
   const [kind, setKind] = useState<AgendaKind>(item?.kind ?? 'todo');
   const [date, setDate] = useState<DateKey>(item?.date ?? defaultDate);
   const [allDay, setAllDay] = useState(item ? item.time === null : true);
   const [time, setTime] = useState(item?.time ?? '09:00');
+  const [importance, setImportance] = useState<AgendaImportance>(item?.importance ?? 'normal');
   const [description, setDescription] = useState(item?.description ?? '');
-  const [reminderOn, setReminderOn] = useState(!!item?.reminder);
-  const [reminder, setReminder] = useState(item?.reminder ?? '09:00');
+  // Boş başlar (gizlice bir saat varsayılmaz) — kullanıcı offset tabanlı bir
+  // hatırlatma eklediğinde saati AÇIKÇA seçmesi gerekir (bkz. validateAgendaInput).
+  const [reminderAnchorTime, setReminderAnchorTime] = useState(item?.reminderAnchorTime ?? '');
+  const [reminders, setReminders] = useState<AgendaReminder[]>(item?.reminders ?? []);
+  const [customDate, setCustomDate] = useState(item?.date ?? defaultDate);
+  const [customTime, setCustomTime] = useState('09:00');
+  const [perm, setPerm] = useState<PermState>(notificationState());
   const [error, setError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+  // React/Preact state güncellemeleri eşzamanlı DEĞİLDİR: aynı JS turunda arka arkaya
+  // gelen iki tıklama, `saving` state'i henüz yeniden render edilmeden ikisi de eski
+  // (false) değeri görebilir. Bu yüzden gerçek koruma bu senkron ref ile yapılır;
+  // `saving` state'i yalnızca düğmenin görünümü (metin/disabled) içindir.
+  const savingRef = useRef(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
+
+  const hasKind = (k: ReminderOffsetKind) => reminders.some((r) => r.kind === k);
+  const customReminder = reminders.find((r) => r.kind === 'custom');
 
   const input = (): AgendaInput => ({
     title,
@@ -33,28 +55,74 @@ export function AgendaEditor({ item, defaultDate, onClose }: { item?: AgendaItem
     date,
     time: allDay ? null : time,
     description,
-    reminder: reminderOn && isValidTime(reminder) ? reminder : null,
+    importance,
+    reminders,
+    reminderAnchorTime: allDay && reminderAnchorTime ? reminderAnchorTime : null,
   });
 
-  const save = () => {
+  // İzin, kullanıcı ilk hatırlatmayı eklerken istenir.
+  const toggleOffset = async (k: Exclude<ReminderOffsetKind, 'custom'>) => {
+    if (hasKind(k)) {
+      setReminders((r) => r.filter((x) => x.kind !== k));
+      return;
+    }
+    if (notificationState() === 'default') setPerm(await requestNotificationPermission());
+    setReminders((r) => [...r, { id: store_genId(), kind: k }]);
+  };
+  const toggleCustom = async () => {
+    if (customReminder) {
+      setReminders((r) => r.filter((x) => x.id !== customReminder.id));
+      return;
+    }
+    if (notificationState() === 'default') setPerm(await requestNotificationPermission());
+    setReminders((r) => [...r, { id: store_genId(), kind: 'custom', customDate, customTime }]);
+  };
+  // Özel hatırlatmanın tarih/saati değişince ilgili kaydı güncel tut.
+  const updateCustom = (nextDate: string, nextTime: string) => {
+    setCustomDate(nextDate);
+    setCustomTime(nextTime);
+    setReminders((r) => r.map((x) => (x.kind === 'custom' ? { ...x, customDate: nextDate, customTime: nextTime } : x)));
+  };
+
+  const save = async () => {
+    if (savingRef.current) return; // çift dokunma aynı kaydı iki kez oluşturmasın (senkron koruma)
     const err = validateAgendaInput(input());
     if (err) return setError(err);
+    savingRef.current = true;
+    setSaving(true);
+    setError(null);
     try {
-      if (item) {
-        store.updateAgendaItem(item.id, input());
-        void cancelAgendaNotifications(item.id); // eski bildirim iptal; yeni plan bir sonraki turda hesaplanır
-      } else {
-        store.addAgendaItem(input());
+      const { item: result, saved } = item ? store.updateAgendaItem(item.id, input()) : store.addAgendaItem(input());
+      const ok = await saved;
+      if (!ok) {
+        setError('Kaydedilemedi: cihaza yazılamadı. Girdiklerin korunuyor, tekrar deneyebilirsin.');
+        savingRef.current = false;
+        setSaving(false);
+        return; // panel KAPANMAZ, form verisi KORUNUR
       }
+      if (item) void cancelAgendaNotifications(item.id); // eski hatırlatmalar iptal, yeni plan bir sonraki turda hesaplanır
+      onSaved?.(result);
       onClose();
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Kaydedilemedi.');
+      savingRef.current = false;
+      setSaving(false);
     }
   };
 
+  const draft: Pick<AgendaItem, 'date' | 'time' | 'reminderAnchorTime' | 'reminders'> = {
+    date,
+    time: allDay ? null : time,
+    reminderAnchorTime: allDay && reminderAnchorTime ? reminderAnchorTime : null,
+    reminders,
+  };
+  const preview = reminderPreview(draft as AgendaItem, new Date());
+  const anyPast = preview.some((p) => p.past);
+  const needsAnchor = allDay && reminders.some((r) => r.kind !== 'custom') && !reminderAnchorTime;
+
   return (
     <>
-      <Sheet title={item ? 'Kaydı Düzenle' : 'Yeni Kayıt'} onClose={onClose} action={{ label: 'Kaydet', onClick: save }}>
+      <Sheet title={item ? 'Kaydı Düzenle' : 'Yeni Kayıt'} onClose={onClose} action={{ label: saving ? 'Kaydediliyor…' : 'Kaydet', onClick: save, disabled: saving }}>
         <div class="form">
           <label class="field">
             <span class="label">Başlık</span>
@@ -84,22 +152,44 @@ export function AgendaEditor({ item, defaultDate, onClose }: { item?: AgendaItem
             )}
           </div>
 
+          <div class="field">
+            <span class="label" id="imp-l">Önem</span>
+            <Segmented class="wide" label="Önem" value={importance} onChange={setImportance} options={IMPORTANCE_OPTIONS} />
+            <p class="hint">Önem senin belirlediğin öncelik; kalan süre (aciliyet) ayrıca ve otomatik hesaplanır.</p>
+          </div>
+
           <label class="field">
-            <span class="label">Açıklama (isteğe bağlı)</span>
+            <span class="label">Not (isteğe bağlı)</span>
             <textarea class="input journal-textarea" maxLength={1000} value={description} onInput={(e) => setDescription(e.currentTarget.value)} />
           </label>
 
           <div class="panel">
-            <div class="row between">
-              <span class="label">Hatırlatıcı</span>
-              <Switch label="Hatırlatıcı" checked={reminderOn} onChange={setReminderOn} />
+            <span class="label">Hatırlatmalar</span>
+            <div class="chips">
+              {TOGGLE_KINDS.map((k) => (
+                <button key={k} class={`chip ${hasKind(k) ? 'on' : ''}`} onClick={() => toggleOffset(k)}>
+                  {REMINDER_OFFSET_LABEL[k]}
+                </button>
+              ))}
+              <button class={`chip ${customReminder ? 'on' : ''}`} onClick={toggleCustom}>
+                {REMINDER_OFFSET_LABEL.custom}
+              </button>
             </div>
-            {reminderOn && (
+            {customReminder && (
+              <div class="row gap">
+                <input class="input" type="date" value={customDate} onInput={(e) => updateCustom(e.currentTarget.value, customTime)} />
+                <input class="input time-input" type="time" value={customTime} onInput={(e) => updateCustom(customDate, e.currentTarget.value)} />
+              </div>
+            )}
+            {allDay && reminders.some((r) => r.kind !== 'custom') && (
               <label class="row gap">
-                <span class="muted">Saat</span>
-                <input class="input time-input" type="time" value={reminder} onInput={(e) => setReminder(e.currentTarget.value)} />
+                <span class="muted">Hatırlatma saati</span>
+                <input class="input time-input" type="time" value={reminderAnchorTime} onInput={(e) => setReminderAnchorTime(e.currentTarget.value)} />
               </label>
             )}
+            {needsAnchor && <p class="error">Tüm günlük kayıtta hatırlatma için bir saat seç — gece yarısı varsayılmaz.</p>}
+            {anyPast && <p class="hint warn">Bazı hatırlatmalar geçmişte kalıyor; bunlar planlanmayacak.</p>}
+            {reminders.length > 0 && <PermissionNote perm={perm} />}
           </div>
 
           {error && (
@@ -125,7 +215,7 @@ export function AgendaEditor({ item, defaultDate, onClose }: { item?: AgendaItem
       {confirmDelete && item && (
         <ConfirmDialog
           title={`“${item.title}” silinsin mi?`}
-          message="Bu kayıt kalıcı olarak silinecek ve bekleyen hatırlatması iptal edilecek."
+          message="Bu kayıt kalıcı olarak silinecek ve bekleyen hatırlatmaları iptal edilecek."
           confirmLabel="Sil"
           danger
           onCancel={() => setConfirmDelete(false)}
@@ -139,3 +229,11 @@ export function AgendaEditor({ item, defaultDate, onClose }: { item?: AgendaItem
     </>
   );
 }
+
+// Bileşen dışı, bağımsız kimlik üretici — formda seçilen hatırlatmalara geçici id vermek için.
+let counter = 0;
+function store_genId(): string {
+  const c = globalThis.crypto as Crypto | undefined;
+  return c?.randomUUID ? c.randomUUID() : `tmp-${Date.now()}-${counter++}`;
+}
+

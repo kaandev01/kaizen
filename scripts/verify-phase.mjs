@@ -173,18 +173,19 @@ const monthTitle3 = await textOf('#calendar-h');
 assert(monthTitle3 === monthTitle1, 'Faz3: "Bugün" düğmesi geçerli aya döndürüyor');
 await shot('04-takvim');
 
+// Takvimde bir güne dokunmak artık bir modal açmaz; o günü SEÇER ve ajandası
+// takvimin altında satır içi görünür (ayrı bir hata düzeltmesiyle eklendi).
 await clickSel('.cal-cell.is-today');
 await sleep(300);
-assert(await exists('.journal-panel'), 'Faz3: gün detayında Günlük paneli var');
-assert((await countOf('.journal-entry')) === 1, 'Faz3: gün detayı, Bugün ekranında eklenen notu gösteriyor (aynı veri)');
-assert((await countOf('.agenda-row')) === 0, 'Faz3: gün detayı açılışta ajanda boş durumunu gösteriyor');
+assert(await exists('.selected-day'), 'Faz3+: seçili gün paneli takvimin altında satır içi görünüyor');
+assert((await countOf('.selected-day .agenda-row')) === 0, 'Faz3: gün detayı açılışta ajanda boş durumunu gösteriyor');
 
-// Ajanda kaydı ekle (saatli + hatırlatıcılı)
-await clickText('+ Ekle', '.sheet');
+// Ajanda kaydı ekle (saatli + hatırlatıcılı) — doğrudan satır içi "+ Ekle"'den.
+await clickText('+ Ekle', '.selected-day');
 await sleep(200);
 await page.type('input[placeholder="Örn. Matematik sınavı"]', 'Matematik sınavı');
 await clickTextLast('Sınav', '[role=dialog]');
-// tüm gün kapat, saat gir (en son açılan diyalog: AgendaEditor)
+// tüm gün kapat, saat gir
 const allDaySwitch = await page.evaluateHandle(() => {
   const dialogs = document.querySelectorAll('[role=dialog]');
   return dialogs[dialogs.length - 1].querySelector('.panel .switch');
@@ -201,25 +202,30 @@ await timeInputHandle.asElement().evaluate((el) => {
 });
 await clickTextLast('Kaydet', '[role=dialog]');
 await sleep(300);
-assert((await countOf('.agenda-row')) === 1, 'Faz3: ajanda kaydı eklendi');
-assert((await textOf('.agenda-title'))?.includes('Matematik'), 'Faz3: ajanda başlığı doğru');
+assert((await countOf('.selected-day .agenda-row')) === 1, 'Faz3: ajanda kaydı eklendi ve HEMEN satır içi listede görünüyor');
+assert((await textOf('.selected-day .agenda-title'))?.includes('Matematik'), 'Faz3: ajanda başlığı doğru');
+assert(await exists('.toast'), 'Faz3+: "Eklendi" kısa geri bildirimi gösterildi');
 await shot('05-gun-detayi-ajanda');
 
 // Düzenle: tamamlandı işaretle
-await clickSel('.agenda-check');
+await clickSel('.selected-day .agenda-check');
 await sleep(200);
-assert(await page.evaluate(() => document.querySelector('.agenda-row').classList.contains('done')), 'Faz3: ajanda kaydı tamamlandı olarak işaretlendi (checkbox)');
+assert(await page.evaluate(() => document.querySelector('.selected-day .agenda-row').classList.contains('done')), 'Faz3: ajanda kaydı tamamlandı olarak işaretlendi (checkbox)');
 
 // Sil (düzenleme ekranından)
-await clickSel('.agenda-main');
+await clickSel('.selected-day .agenda-main');
 await sleep(200);
 await clickTextLast('Kaydı Sil', '[role=dialog]');
 await sleep(150);
 await clickText('Sil', '[role=alertdialog]');
 await sleep(250);
-assert((await countOf('.agenda-row')) === 0, 'Faz3: ajanda kaydı silindi');
+assert((await countOf('.selected-day .agenda-row')) === 0, 'Faz3: ajanda kaydı silindi');
 
-// Alışkanlıklar gün detayında görünüyor mu (salt okunur)
+// "Gün detayı" ayrı bir modal olarak Günlük + Alışkanlıklar + Odaklanma gösterir.
+await clickText('Gün detayı', '.selected-day');
+await sleep(300);
+assert(await exists('.journal-panel'), 'Faz3: gün detayında Günlük paneli var');
+assert((await countOf('.journal-entry')) === 1, 'Faz3: gün detayı, Bugün ekranında eklenen notu gösteriyor (aynı veri)');
 assert((await countOf('.mini-habit')) === 1, 'Faz3: gün detayında alışkanlık ilerlemesi (salt okunur) gösteriliyor');
 assert((await exists('.mini-habit .add-btn')) === false, 'Faz3: gün detayındaki alışkanlık satırında artırma düğmesi YOK (salt okunur)');
 
