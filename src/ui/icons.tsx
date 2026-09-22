@@ -8,8 +8,8 @@ import type { ComponentChildren } from 'preact';
 // ---- arayüz ikonları ------------------------------------------------------
 export type IconName =
   | 'plus' | 'minus' | 'check' | 'x' | 'xCircle' | 'flame' | 'trash' | 'bell' | 'pencil'
-  | 'play' | 'pause' | 'reset' | 'skip' | 'clock' | 'chevronRight' | 'chevronDown'
-  | 'today' | 'hourglass' | 'sliders' | 'sun' | 'moon' | 'monitor';
+  | 'play' | 'pause' | 'reset' | 'skip' | 'clock' | 'chevronRight' | 'chevronLeft' | 'chevronDown'
+  | 'today' | 'hourglass' | 'sliders' | 'sun' | 'moon' | 'monitor' | 'calendar' | 'mic' | 'micOff' | 'target';
 
 const UI: Record<IconName, ComponentChildren> = {
   plus: <path d="M12 5v14M5 12h14" />,
@@ -42,6 +42,7 @@ const UI: Record<IconName, ComponentChildren> = {
     </>
   ),
   chevronRight: <path d="m9 18 6-6-6-6" />,
+  chevronLeft: <path d="m15 18-6-6 6-6" />,
   chevronDown: <path d="m6 9 6 6 6-6" />,
   today: (
     <>
@@ -62,6 +63,30 @@ const UI: Record<IconName, ComponentChildren> = {
     <>
       <rect x="2" y="3" width="20" height="14" rx="2" />
       <path d="M8 21h8M12 17v4" />
+    </>
+  ),
+  calendar: (
+    <>
+      <rect x="3" y="4.5" width="18" height="16" rx="2.5" />
+      <path d="M3 9.5h18M8 2.5v4M16 2.5v4" />
+    </>
+  ),
+  mic: (
+    <>
+      <rect x="9" y="2" width="6" height="12" rx="3" />
+      <path d="M5 11a7 7 0 0 0 14 0M12 18v4M8.5 22h7" />
+    </>
+  ),
+  micOff: (
+    <>
+      <path d="M9 2h1a3 3 0 0 1 3 3v4.5M15 9.5V13a3 3 0 0 1-4.7 2.5M5 11a7 7 0 0 0 10.6 6M19 11a7 7 0 0 1-1.15 3.85M12 18v4M8.5 22h7M2 2l20 20" />
+    </>
+  ),
+  target: (
+    <>
+      <circle cx="12" cy="12" r="9" />
+      <circle cx="12" cy="12" r="5" />
+      <circle cx="12" cy="12" r="1.5" fill="currentColor" />
     </>
   ),
 };

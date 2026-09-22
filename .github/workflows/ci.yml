@@ -1,0 +1,30 @@
+# Kalite kapısı: dev'e her push'ta ve main/dev'e açılan her Pull Request'te
+# tip denetimi + test + derleme çalışır. Yayın (Pages) yalnızca main'de, deploy.yml ile olur.
+name: CI
+
+on:
+  push:
+    branches: [dev]
+  pull_request:
+    branches: [main, dev]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run build

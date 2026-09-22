@@ -9,6 +9,8 @@ import { Icon, Ring, Sheet } from './components';
 import { HabitEditor } from './HabitEditor';
 import { useAppState, useStore, useToday } from './hooks';
 import { HabitIcon } from './icons';
+import { JournalPanel } from './JournalPanel';
+import { goToSettings } from './nav';
 import { cancelHabitNotifications, haptic } from './platform';
 
 interface UndoToast {
@@ -24,6 +26,7 @@ export function TodayScreen() {
   const today = useToday();
   const [editor, setEditor] = useState<{ habitId?: string } | null>(null);
   const [amountFor, setAmountFor] = useState<string | null>(null);
+  const [journalOpen, setJournalOpen] = useState(false);
   const [toast, setToast] = useState<UndoToast | null>(null);
   const history = useRef<UndoToast[]>([]); // adım adım geri alma yığını
   const [celebrate, setCelebrate] = useState<string | null>(null);
@@ -90,9 +93,17 @@ export function TodayScreen() {
           <p class="eyebrow">{formatLongDate(today)}</p>
           <h1 id="today-h">Bugün</h1>
         </div>
-        <button class="sq-btn" aria-label="Yeni alışkanlık ekle" onClick={() => setEditor({})}>
-          <Icon name="plus" />
-        </button>
+        <div class="row gap">
+          <button class="round-btn" aria-label="Ayarlar" onClick={goToSettings}>
+            <Icon name="sliders" size={20} />
+          </button>
+          <button class="round-btn mic-btn" aria-label="Bugüne not ekle (sesle veya yazarak)" onClick={() => setJournalOpen(true)}>
+            <Icon name="mic" size={20} />
+          </button>
+          <button class="sq-btn" aria-label="Yeni alışkanlık ekle" onClick={() => setEditor({})}>
+            <Icon name="plus" />
+          </button>
+        </div>
       </header>
 
       {state.habits.length === 0 ? (
@@ -166,6 +177,11 @@ export function TodayScreen() {
         />
       )}
       {editor && <HabitEditor habit={editing} onClose={() => setEditor(null)} />}
+      {journalOpen && (
+        <Sheet title="Bugünün Günlüğü" onClose={() => setJournalOpen(false)} closeLabel="Kapat">
+          <JournalPanel date={today} />
+        </Sheet>
+      )}
     </section>
   );
 }

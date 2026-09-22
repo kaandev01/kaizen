@@ -166,3 +166,4 @@ export async function schedulePomodoroEnd(endsAt: number, title: string, body: s
 
 export const cancelPomodoroEnd = () => cancelNotifications((t) => t === 'pomodoro-end');
 export const cancelHabitNotifications = (habitId: string) => cancelNotifications((t) => t.startsWith(`habit:${habitId}`));
+export const cancelAgendaNotifications = (itemId: string) => cancelNotifications((t) => t.startsWith(`agenda:${itemId}`));
