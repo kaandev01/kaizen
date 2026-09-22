@@ -1,8 +1,11 @@
 import { normalizeReminders } from './reminders';
-import type { PomodoroConfig, Schedule } from './types';
+import type { AgendaKind, PomodoroConfig, Schedule } from './types';
 
 export const MAX_TARGET = 100_000;
 export const MAX_AMOUNT = 999_999;
+export const MAX_JOURNAL_LEN = 4000;
+export const MAX_TITLE_LEN = 80;
+export const MAX_DESCRIPTION_LEN = 1000;
 
 export interface HabitInput {
   name: string;
@@ -52,4 +55,47 @@ export function sanitizePomodoroConfig(c: PomodoroConfig): PomodoroConfig {
     longMin: clamp(c.longMin, 1, 120, 15),
     longEvery: clamp(c.longEvery, 2, 12, 4),
   };
+}
+
+// ---- günlük -------------------------------------------------------------
+/** Kaydetmeden önce: boş metin veya çok uzun metin reddedilir. */
+export function validateJournalText(text: string): string | null {
+  const t = text.trim();
+  if (!t) return 'Not boş olamaz.';
+  if (t.length > MAX_JOURNAL_LEN) return `Not en fazla ${MAX_JOURNAL_LEN} karakter olabilir.`;
+  return null;
+}
+
+// ---- gün puanı -------------------------------------------------------------
+export const isValidRating = (n: number): boolean => Number.isInteger(n) && n >= 1 && n <= 10;
+
+// ---- ajanda (deadline / etkinlik) -------------------------------------------
+export interface AgendaInput {
+  title: string;
+  kind: AgendaKind;
+  date: string;
+  time: string | null;
+  description: string;
+  reminder: string | null;
+}
+
+export function validateAgendaInput(i: AgendaInput): string | null {
+  if (!i.title.trim()) return 'Bir başlık gir.';
+  if (i.title.trim().length > MAX_TITLE_LEN) return `Başlık en fazla ${MAX_TITLE_LEN} karakter olabilir.`;
+  if (!i.date) return 'Bir tarih seç.';
+  if (i.description.length > MAX_DESCRIPTION_LEN) return `Açıklama en fazla ${MAX_DESCRIPTION_LEN} karakter olabilir.`;
+  return null;
+}
+
+// ---- hedefler (aylık/yıllık) -------------------------------------------------
+export interface GoalInput {
+  title: string;
+  description: string;
+}
+
+export function validateGoalInput(i: GoalInput): string | null {
+  if (!i.title.trim()) return 'Bir başlık gir.';
+  if (i.title.trim().length > MAX_TITLE_LEN) return `Başlık en fazla ${MAX_TITLE_LEN} karakter olabilir.`;
+  if (i.description.length > MAX_DESCRIPTION_LEN) return `Açıklama en fazla ${MAX_DESCRIPTION_LEN} karakter olabilir.`;
+  return null;
 }

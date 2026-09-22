@@ -64,6 +64,12 @@ export function formatLongDate(key: DateKey): string {
   return `${dayLong(isoWeekday(key))}, ${d} ${MONTHS[m - 1]}`;
 }
 
+/** Bir zaman damgasını yerel "HH:mm" olarak biçimlendirir (günlük/ajanda saatleri için). */
+export function formatClockTime(ms: number): string {
+  const d = new Date(ms);
+  return `${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
 export function greeting(now: Date): string {
   const h = now.getHours();
   if (h < 5) return 'İyi geceler';

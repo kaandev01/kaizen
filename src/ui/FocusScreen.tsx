@@ -1,9 +1,12 @@
 import { useState } from 'preact/hooks';
 import { toDateKey } from '../core/dates';
+import { formatDuration } from '../core/format';
 import { remainingNow, type Phase } from '../core/pomodoro';
+import { focusStatsForDay } from '../core/pomoStats';
 import { Icon, Ring, Segmented } from './components';
 import { Durations } from './Durations';
 import { useAppState, useNow, useStore } from './hooks';
+import { goToSettings } from './nav';
 import { haptic, isIOS, unlockAudio } from './platform';
 
 const NEXT_HINT: Record<Phase, string> = { focus: 'Odaklanma için hazır', short: 'Kısa mola için hazır', long: 'Uzun mola için hazır' };
@@ -19,7 +22,7 @@ const spoken = (ms: number) => {
 
 export function FocusScreen() {
   const store = useStore();
-  const { pomodoro: p, settings, pomoHistory } = useAppState();
+  const { pomodoro: p, settings, pomoSessions } = useAppState();
   const [durationsOpen, setDurationsOpen] = useState(false);
   const running = p.status === 'running';
   const now = useNow(250, running);
@@ -29,8 +32,7 @@ export function FocusScreen() {
   const filled = p.phase === 'long' ? dots : p.cycleCount % dots;
 
   const todayKey = toDateKey(new Date());
-  const todays = pomoHistory.filter((r) => toDateKey(new Date(r.at)) === todayKey);
-  const todayMin = Math.round(todays.reduce((s, r) => s + r.ms, 0) / 60_000);
+  const todayStats = focusStatsForDay(pomoSessions, todayKey);
 
   const act = (fn: () => void) => () => {
     unlockAudio(); // iOS: ses, kullanıcı dokunuşuyla açılır
@@ -52,6 +54,9 @@ export function FocusScreen() {
           <p class="eyebrow">Pomodoro</p>
           <h1 id="focus-h">Odaklan</h1>
         </div>
+        <button class="round-btn" aria-label="Ayarlar" onClick={goToSettings}>
+          <Icon name="sliders" size={20} />
+        </button>
       </header>
 
       <Segmented<Phase>
@@ -108,7 +113,7 @@ export function FocusScreen() {
       <p class="control-caption">{primary.label}</p>
 
       <p class="today-line">
-        Bugün <b>{todays.length}</b> seans · <b>{todayMin}</b> dk odak
+        Bugün <b>{todayStats.completedCount} Pomodoro</b> · <b>{formatDuration(todayStats.activeMs)}</b>
       </p>
 
       <div class="collapsible">
