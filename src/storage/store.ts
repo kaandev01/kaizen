@@ -1,3 +1,4 @@
+import { normalizeAgendaItem } from '../core/agenda';
 import type { Backup } from '../core/backup';
 import { toDateKey, type Clock, type DateKey } from '../core/dates';
 import { withRevision } from '../core/plan';
@@ -18,6 +19,7 @@ import {
 import {
   clampAmount,
   isValidRating,
+  normalizeAgendaReminders,
   normalizeHabitInput,
   sanitizePomodoroConfig,
   validateAgendaInput,
@@ -29,6 +31,12 @@ import {
   type HabitInput,
 } from '../core/validation';
 import type { FullSnapshot, Storage } from './storage';
+
+/** Bir yazma işleminin sonucu: kalıcı olarak gerçekten yazıldı mı (`saved` çözümlenince). */
+export interface Persisted<T> {
+  item: T;
+  saved: Promise<boolean>;
+}
 
 /**
  * v1: habits/logs/settings/pomodoro/pomoHistory.
@@ -131,8 +139,17 @@ export class Store {
     this.listeners.forEach((l) => l());
   }
 
-  private persist(job: () => Promise<void>) {
-    this.queue = this.queue.then(job).then(
+  /**
+   * Yazma işlemini sıraya sokar (kalıcı hata durumunu her zamanki gibi genel
+   * `persistError` bandına yansıtır) VE bu belirli çağrının gerçekten başarılı
+   * olup olmadığını `Promise<boolean>` olarak döndürür. Çoğu çağıran bunu
+   * beklemeden (fire-and-forget) kullanır — bu, kuyruğun sırasını bozmaz.
+   * Anlık başarı/başarısızlığı bilmesi gereken çağıranlar (ör. bir formu
+   * kapatmadan önce) sonucu await edebilir.
+   */
+  private persist(job: () => Promise<void>): Promise<boolean> {
+    const attempt = this.queue.then(job);
+    this.queue = attempt.then(
       () => {
         if (this.state.persistError) this.set({ persistError: null });
       },
@@ -140,6 +157,10 @@ export class Store {
         console.error('Kaydetme hatası', e);
         this.set({ persistError: 'Veriler cihaza kaydedilemedi. Verilerini dışa aktarmayı düşün.' });
       },
+    );
+    return attempt.then(
+      () => true,
+      () => false,
     );
   }
 
@@ -178,7 +199,7 @@ export class Store {
     const journal = snap.journal.filter(validJournalEntry);
     const ratings: Record<DateKey, DayRating> = {};
     for (const r of snap.ratings.filter(validRating)) ratings[r.date] = r;
-    const agenda = snap.agenda.filter(validAgendaItem);
+    const agenda = snap.agenda.filter(validAgendaItem).map(normalizeAgendaItem);
     const goals = snap.goals.filter(validGoal);
 
     this.state = { ...this.state, ready: true, habits, logs, settings, pomodoro, pomoSessions, journal, ratings, agenda, goals };
@@ -357,7 +378,13 @@ export class Store {
   }
 
   // ---- ajanda (deadline / etkinlik) -------------------------------------------
-  addAgendaItem(input: AgendaInput): AgendaItem {
+  /**
+   * Anında (iyimser) olarak listeye ekler — kaydetme çağrısını bekletmeden
+   * "yeni kaydı hemen göster" gereksinimini karşılar. `saved` gerçek
+   * IndexedDB yazması başarılı mı diye çözümlenir; başarısızsa öğe otomatik
+   * olarak geri alınır (listeden kaldırılır) ki arayüz gerçeği yanlış göstermesin.
+   */
+  addAgendaItem(input: AgendaInput): Persisted<AgendaItem> {
     const err = validateAgendaInput(input);
     if (err) throw new Error(err);
     const now = this.clock.now().getTime();
@@ -368,17 +395,23 @@ export class Store {
       date: input.date,
       time: input.time,
       description: input.description.trim(),
-      reminder: input.reminder,
+      importance: input.importance,
+      reminders: normalizeAgendaReminders(input.reminders),
+      reminderAnchorTime: input.time ? null : input.reminderAnchorTime,
       done: false,
+      completedAt: null,
       createdAt: now,
       updatedAt: now,
     };
     this.set({ agenda: [...this.state.agenda, item] });
-    this.persist(() => this.storage.putAgendaItem(item));
-    return item;
+    const saved = this.persist(() => this.storage.putAgendaItem(item)).then((ok) => {
+      if (!ok) this.set({ agenda: this.state.agenda.filter((a) => a.id !== item.id) });
+      return ok;
+    });
+    return { item, saved };
   }
 
-  updateAgendaItem(id: string, input: AgendaInput): AgendaItem {
+  updateAgendaItem(id: string, input: AgendaInput): Persisted<AgendaItem> {
     const err = validateAgendaInput(input);
     if (err) throw new Error(err);
     const existing = this.state.agenda.find((a) => a.id === id);
@@ -390,18 +423,24 @@ export class Store {
       date: input.date,
       time: input.time,
       description: input.description.trim(),
-      reminder: input.reminder,
+      importance: input.importance,
+      reminders: normalizeAgendaReminders(input.reminders),
+      reminderAnchorTime: input.time ? null : input.reminderAnchorTime,
       updatedAt: this.clock.now().getTime(),
     };
     this.set({ agenda: this.state.agenda.map((a) => (a.id === id ? item : a)) });
-    this.persist(() => this.storage.putAgendaItem(item));
-    return item;
+    const saved = this.persist(() => this.storage.putAgendaItem(item)).then((ok) => {
+      if (!ok) this.set({ agenda: this.state.agenda.map((a) => (a.id === id ? existing : a)) });
+      return ok;
+    });
+    return { item, saved };
   }
 
+  /** Tamamlanma zamanını (`completedAt`) tutar; geri alınırsa null'a döner ve gelecekteki hatırlatmalar tekrar geçerli olur. */
   setAgendaDone(id: string, done: boolean): void {
     const existing = this.state.agenda.find((a) => a.id === id);
     if (!existing || existing.done === done) return;
-    const item: AgendaItem = { ...existing, done, updatedAt: this.clock.now().getTime() };
+    const item: AgendaItem = { ...existing, done, completedAt: done ? this.clock.now().getTime() : null, updatedAt: this.clock.now().getTime() };
     this.set({ agenda: this.state.agenda.map((a) => (a.id === id ? item : a)) });
     this.persist(() => this.storage.putAgendaItem(item));
   }
@@ -478,7 +517,7 @@ export class Store {
     const journal = data.journal.filter(validJournalEntry);
     const ratings: Record<DateKey, DayRating> = {};
     for (const r of data.ratings.filter(validRating)) ratings[r.date] = r;
-    const agenda = data.agenda.filter(validAgendaItem);
+    const agenda = data.agenda.filter(validAgendaItem).map(normalizeAgendaItem);
     const goals = data.goals.filter(validGoal);
     const settings = mergeSettings(data.settings);
     const pomodoro = pomo.initialPomo(settings.pomodoro);

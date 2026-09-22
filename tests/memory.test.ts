@@ -23,8 +23,11 @@ const agendaItem = (date: string): AgendaItem => ({
   date,
   time: null,
   description: '',
-  reminder: null,
+  importance: 'normal',
+  reminders: [],
+  reminderAnchorTime: null,
   done: false,
+  completedAt: null,
   createdAt: 0,
   updatedAt: 0,
 });

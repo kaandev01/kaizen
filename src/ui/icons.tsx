@@ -9,7 +9,8 @@ import type { ComponentChildren } from 'preact';
 export type IconName =
   | 'plus' | 'minus' | 'check' | 'x' | 'xCircle' | 'flame' | 'trash' | 'bell' | 'pencil'
   | 'play' | 'pause' | 'reset' | 'skip' | 'clock' | 'chevronRight' | 'chevronLeft' | 'chevronDown'
-  | 'today' | 'hourglass' | 'sliders' | 'sun' | 'moon' | 'monitor' | 'calendar' | 'mic' | 'micOff' | 'target';
+  | 'today' | 'hourglass' | 'sliders' | 'sun' | 'moon' | 'monitor' | 'calendar' | 'mic' | 'micOff' | 'target'
+  | 'flag' | 'cap' | 'checklist' | 'dot';
 
 const UI: Record<IconName, ComponentChildren> = {
   plus: <path d="M12 5v14M5 12h14" />,
@@ -89,6 +90,15 @@ const UI: Record<IconName, ComponentChildren> = {
       <circle cx="12" cy="12" r="1.5" fill="currentColor" />
     </>
   ),
+  flag: <path d="M5 3v18M5 4h12l-2.5 4L17 12H5" />,
+  cap: (
+    <>
+      <path d="m2 9 10-5 10 5-10 5-10-5Z" />
+      <path d="M6 11v5c0 1.5 2.5 3 6 3s6-1.5 6-3v-5M22 9v6" />
+    </>
+  ),
+  checklist: <path d="M9 6h11M9 12h11M9 18h11M4 6l1 1 2-2M4 12l1 1 2-2M4 18l1 1 2-2" />,
+  dot: <circle cx="12" cy="12" r="4" fill="currentColor" />,
 };
 
 // ---- alışkanlık ikonları (kullanıcı seçer; anahtar Habit.icon'da saklanır) ----

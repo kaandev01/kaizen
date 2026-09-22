@@ -412,7 +412,10 @@ button:disabled {
 .notice.banner {
   position: sticky;
   top: calc(env(safe-area-inset-top) + 6px);
-  z-index: 30;
+  /* Herhangi bir panel/diyalog açıkken de görünür kalsın diye en üstteki
+     backdrop'tan (z-index 60) bile daha yüksek — bir kaydetme hatası hiçbir
+     zaman açık bir formun arkasında gizli kalmamalı. */
+  z-index: 70;
   margin: 6px 12px 0;
   box-shadow: var(--shadow);
 }
@@ -435,7 +438,8 @@ button:disabled {
   left: 50%;
   bottom: calc(var(--tab-h) + env(safe-area-inset-bottom) + 14px);
   transform: translateX(-50%);
-  z-index: 40;
+  /* Bir panel açıkken de (ör. miktar sayfası açıkken geri al kısayolu) görünür kalsın. */
+  z-index: 65;
   width: min(92vw, 484px);
   display: flex;
   align-items: center;
@@ -1348,12 +1352,29 @@ button:disabled {
   flex: 1;
   min-width: 0;
   display: flex;
-  flex-direction: column;
-  gap: 2px;
+  align-items: center;
+  gap: 8px;
   text-align: left;
   background: none;
   border: 0;
   padding: 6px 4px;
+}
+.agenda-kind-icon {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 8px;
+  background: var(--surface-3);
+  color: var(--muted);
+}
+.agenda-main-text {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
 }
 .agenda-title {
   font-weight: 650;
@@ -1361,9 +1382,28 @@ button:disabled {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.agenda-meta {
+  font-size: 0.82rem;
+  color: var(--muted);
+}
 .agenda-row.overdue .agenda-title,
-.agenda-row.overdue .muted {
+.agenda-row.overdue .agenda-meta {
   color: var(--danger);
+}
+.importance-badge {
+  flex: none;
+  padding: 2px 8px;
+  border-radius: 10px;
+  font-size: 0.72rem;
+  font-weight: 700;
+}
+.importance-badge.important {
+  background: var(--warn-bg);
+  color: var(--warn-text);
+}
+.importance-badge.critical {
+  background: var(--danger);
+  color: #fff;
 }
 .mini-habits,
 .mini-sessions {
@@ -1442,9 +1482,19 @@ button:disabled {
   background: var(--primary);
   color: var(--on-primary);
 }
-.cal-dot {
+.cal-cell.is-selected {
+  box-shadow: inset 0 0 0 2px var(--primary);
+}
+.cal-cell.is-today.is-selected {
+  box-shadow: inset 0 0 0 2px var(--on-primary);
+}
+.cal-dots {
   position: absolute;
-  bottom: 6px;
+  bottom: 5px;
+  display: flex;
+  gap: 3px;
+}
+.cal-dot {
   width: 5px;
   height: 5px;
   border-radius: 50%;
@@ -1455,6 +1505,23 @@ button:disabled {
 }
 .cal-cell.is-today .cal-dot {
   background: var(--on-primary);
+}
+
+.selected-day {
+  margin-top: 16px;
+  padding: 14px;
+  border-radius: var(--radius);
+  background: var(--surface);
+  box-shadow: var(--shadow);
+  border: 1px solid var(--border);
+}
+.selected-day .agenda-list {
+  margin-top: 10px;
+}
+
+/* ---- Bugün: Yaklaşan bölümü ------------------------------------------------ */
+.upcoming-card {
+  margin-top: 18px;
 }
 .period-nav {
   display: flex;

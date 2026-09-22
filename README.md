@@ -13,7 +13,7 @@ ama bu sürümde hiçbir şey otomatik yorumlanmaz veya AI'ya gönderilmez.
 ```bash
 npm install          # ilk kurulum
 npm run dev          # geliştirme sunucusu (http://localhost:5173, ağdaki cihazlardan da erişilir)
-npm test             # birim/entegrasyon testleri (102 test)
+npm test             # birim/entegrasyon testleri (122 test)
 npm run typecheck    # TypeScript denetimi
 npm run build        # dist/ klasörüne üretim derlemesi (PWA + service worker dahil)
 npm run icons        # uygulama simgelerini yeniden üretir (scripts/make-icons.mjs)
@@ -45,7 +45,7 @@ Alt menü: **Bugün / Odaklan / Takvim**. Ayarlar her ekranın sağ üstündeki 
 
 - **Bugün:** alışkanlık ilerlemesi + günlük halka (değişmedi) ve küçük bir **mikrofon düğmesi** (bugüne hızlıca not eklemek için — alışkanlık artırma düğmeleriyle karışmaz, ayrı bir alanda).
 - **Odaklan:** bağımsız Pomodoro (değişmedi).
-- **Takvim:** aylık ızgara. Bir güne dokununca o günün **gün puanı, günlük notları, ajanda kayıtları, alışkanlık ilerlemesi (salt okunur) ve Pomodoro özeti** tek sayfada açılır. Üstteki hedef ikonu **Hedefler** sayfasını açar.
+- **Takvim:** aylık ızgara + **Takvim/Liste** geçişi. Bir güne dokununca o günün ajanda kayıtları **takvimin altında satır içi** hemen görünür (ekleme bir modal içinde olur ama sonucu görmek için modal açmak GEREKMEZ). "Gün detayı" düğmesi ayrıca o günün **gün puanı, günlük notları, alışkanlık ilerlemesi (salt okunur) ve Pomodoro özetini** açar. Üstteki hedef ikonu **Hedefler** sayfasını açar.
 
 ## Pomodoro geçmişi
 
@@ -75,11 +75,41 @@ gerçek **çalışma aralıkları** (`segments`), bunlardan hesaplanan `activeMs
 
 ## Takvim / ajanda (deadline, sınav, yapılacak, diğer)
 
-- Aylık ızgara, Pazartesi başlangıçlı. Gecikmiş (tamamlanmamış + süresi geçmiş) kaydı olan günler kırmızı noktayla işaretlenir.
-- Kayıt alanları: başlık, tür, tarih, isteğe bağlı saat (yoksa "tüm gün"), açıklama, isteğe bağlı hatırlatma saati, tamamlandı/tamamlanmadı.
+**Bir defa gerçek bir hata olarak bildirildi ve düzeltildi:** deadline kaydedildikten sonra hiçbir
+şey görünmüyordu. Kök neden üç ayrı sorundu (ayrıntılar [Bilinen düzeltmeler](#bilinen-düzeltmeler-deadline-görünmezlik-hatası) altında);
+şimdi ekleme akışı **iyimser + doğrulanmış**: kayıt anında satır içi listede görünür, gerçek
+kalıcı yazma başarısız olursa otomatik geri alınır ve kullanıcıya panel kapanmadan gösterilir.
+
+- Aylık ızgara, Pazartesi başlangıçlı; **Takvim/Liste** geçişi. Gecikmiş kaydı olan günler kırmızı, diğerleri nötr noktayla işaretlenir (bir hücrede en fazla 3 nokta).
+- Seçili günün ajandası **takvimin hemen altında, satır içi** listelenir — hiçbir modal açmadan görünür; boşsa yalnızca "Bu gün için kayıt yok" yazar.
+- Kayıt alanları: başlık, tür, tarih, isteğe bağlı saat (yoksa "tüm gün"), **önem** (normal/önemli/kritik — kullanıcı seçer), isteğe bağlı not, **birden fazla hatırlatma**, tamamlanma durumu + tamamlanma zamanı.
+- **Önem, zamana bağlı aciliyetle karıştırılmaz**: aciliyet (`urgencyOf`) yalnızca tarihten hesaplanır; "kritik" işaretli ama uzak bir kayıt aciliyet açısından hâlâ "later"dır.
 - **Tüm günlük bir kayıt kendi günü bitmeden gecikmiş sayılmaz**; saatli bir kayıt saatini geçince gecikmiş sayılır. Tamamlanan kayıtlar hiçbir zaman gecikmiş sayılmaz (`src/core/agenda.ts` → `isOverdue`).
-- Düzenleme/silme, hatırlatma zamanlamasını otomatik günceller (hatırlatma anahtarı tarih+saate bağlıdır; bkz. `agendaRemindersBetween`).
+- Hatırlatmalar: 1 hafta/1 gün/1 saat önce, tam zamanında, özel tarih+saat — çoklu seçilebilir. **Tüm günlük bir kayıtta offset tabanlı hatırlatma eklemek için kullanıcı açıkça bir "hatırlatma saati" seçmek ZORUNDADIR** — hiçbir zaman gizlice gece yarısına düşmez (`reminderTriggerAt`, boş anchor'da `null` döner, hatırlatma planlanmaz). Geçmişte kalacak bir hatırlatma editörde açıkça işaretlenir.
+- Düzenleme/silme, hatırlatma zamanlamasını otomatik günceller (her hatırlatmanın anahtarı kayıt+hatırlatma+tetiklenme anına bağlıdır; bkz. `agendaRemindersBetween`); tamamlanma geri alınırsa gelecekteki hatırlatmalar tekrar geçerli olur.
+- **Bugün ekranı → Yaklaşan:** günlük ilerlemenin altında, en fazla 3 tamamlanmamış kayıt (gecikenler önce), her biri kısa bir aciliyet ifadesiyle ("Bugün 18.00", "Yarın", "3 gün kaldı", "2 gün gecikti"). Kayıt yoksa bölüm hiç render edilmez. "Tümü" → Takvim'i doğrudan Liste görünümünde açar.
+- **Liste görünümü:** Geciken / Bugün / Yaklaşan / Tamamlanan (varsayılan kapalı) gruplu, tüm ajandayı tarihten bağımsız gösterir.
 - Tekrarlayan etkinlikler ve harici takvim senkronizasyonu bu fazda **yok** (kapsam dışı, bilinçli).
+
+## Bilinen düzeltmeler: deadline görünmezlik hatası
+
+Araştırma (oluşturma→saklama→sorgulama→gösterme zincirinin uçtan uca gerçek tarayıcıda sürülmesi)
+zincirin kendisinin doğru çalıştığını gösterdi, ama üç gerçek hata bulundu ve düzeltildi:
+
+1. **Çift dokunma aynı kaydı iki kez oluşturuyordu.** React/Preact state güncellemeleri eşzamanlı
+   değildir; aynı JS turunda arka arkaya gelen iki tıklama, henüz yeniden render edilmemiş `saving`
+   state'ini ikisi de "false" görebiliyordu. Düzeltme: gerçek koruma bir `useRef` (senkron) ile
+   yapılıyor; `useState` yalnızca düğmenin görünümü için kullanılıyor (`AgendaEditor.tsx`).
+2. **Kaydetme, gerçek IndexedDB yazması bitmeden paneli kapatıyordu.** `Store.addAgendaItem`/
+   `updateAgendaItem` artık kaydın kendisini VE gerçek yazmanın sonucunu (`Promise<boolean>`)
+   birlikte döndürür (`Persisted<T>`); UI bunu bekler. Yazma başarısız olursa iyimser eklenen kayıt
+   **otomatik geri alınır**, panel KAPANMAZ, girilen bilgiler korunur, hata gösterilir.
+3. **Hata bandı açık bir panelin arkasında kalabiliyordu** (z-index çakışması: bant 30, panel 50).
+   Düzeltme: kaydetme hatası bandı ve toast, her panelden daha yüksek katmanda gösteriliyor.
+
+Bunlara ek olarak görünürlük zayıftı: kayıttan sonra "Eklendi" bildirimi yoktu, ana ekranda
+deadline hiç görünmüyordu, takvimdeki işaret küçüktü. Bunlar `Yaklaşan` bölümü, satır içi gün
+listesi ve toast ile giderildi (yukarıya bakın).
 
 ## Aylık / yıllık hedefler
 
@@ -121,7 +151,7 @@ katmanının üzerine kolayca inşa edilebileceği, test edilmiş bir sorgu katm
 | Renkler, yarıçap, yazı tipi (Stitch tasarımı: lavanta zemin, mor ana renk; açık/koyu tokenlar) | `src/styles.css` → en üstteki `:root` tokenları |
 | Bileşen görünümü | `src/styles.css` (bileşen bölümleri) |
 | Ana ekranlar | `src/ui/TodayScreen.tsx`, `FocusScreen.tsx`, `CalendarScreen.tsx`, `SettingsScreen.tsx` |
-| Gün detayı / ajanda / hedefler / günlük panelleri | `src/ui/DayDetailSheet.tsx`, `AgendaEditor.tsx`, `GoalsSheet.tsx`, `GoalEditor.tsx`, `JournalPanel.tsx` |
+| Gün detayı / ajanda / hedefler / günlük panelleri | `src/ui/DayDetailSheet.tsx`, `AgendaEditor.tsx`, `AgendaRow.tsx`, `AgendaListView.tsx`, `GoalsSheet.tsx`, `GoalEditor.tsx`, `JournalPanel.tsx` |
 | Sesle giriş sarmalayıcısı | `src/ui/speech.ts` |
 | Sekmeler arası gezinme (Ayarlar dişlisi) | `src/ui/nav.ts` |
 | Alışkanlık ikonları (çizgi ikon kümesi) | `src/ui/icons.tsx` (`HABIT_ICONS`; yeni ikon = tabloya bir giriş) |
@@ -154,4 +184,5 @@ katmanının üzerine kolayca inşa edilebileceği, test edilmiş bir sorgu katm
 
 ## Doğrulama araçları
 - `node scripts/screenshots.mjs [klasör]` — dev sunucusu açıkken, temel akışların (alışkanlık, Pomodoro, ayarlar) açık/koyu ekran görüntülerini üretir.
-- `node scripts/verify-phase.mjs [klasör]` — dev sunucusu açıkken, bu fazın **tüm** yeni özelliklerini (günlük + sesle giriş hata yolu, gün puanı, takvim gezinme, ajanda CRUD + gecikme, hedefler + dönem izolasyonu, gerçek dosya indirme/yükleme ile yedek geri yükleme — onaylı/onaysız) gerçek tarayıcıda sürüp assert eder; başarısızlıkta çıkış kodu 1 döner.
+- `node scripts/verify-phase.mjs [klasör]` — dev sunucusu açıkken, günlük + sesle giriş hata yolu, gün puanı, takvim gezinme, ajanda CRUD + gecikme, hedefler + dönem izolasyonu, gerçek dosya indirme/yükleme ile yedek geri yükleme (onaylı/onaysız) akışlarını gerçek tarayıcıda sürüp assert eder.
+- `node scripts/verify-deadline-fix.mjs [url]` — deadline görünmezlik hatasının düzeltmesini (satır içi anında görünürlük, "Eklendi" toast, çift-dokunma koruması, tüm günlük hatırlatmada zorunlu saat, Yaklaşan/Liste görünümü, tamamla/geri al, yeniden açılışta kalıcılık) gerçek tarayıcıda uçtan uca doğrular.

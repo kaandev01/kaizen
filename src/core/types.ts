@@ -60,6 +60,23 @@ export interface DayRating {
 
 // ---- Takvim: deadline / etkinlik --------------------------------------------
 export type AgendaKind = 'deadline' | 'exam' | 'todo' | 'other';
+/** Kullanıcının kendi seçtiği önem derecesi. Zamana bağlı aciliyetle (bkz. core/agenda.ts → urgencyOf) KARIŞTIRILMAZ; ikisi ayrı kavramdır. */
+export type AgendaImportance = 'normal' | 'important' | 'critical';
+
+export type ReminderOffsetKind = 'exact' | '1h' | '1d' | '1w' | 'custom';
+
+/**
+ * Bir hatırlatma seçeneği. `exact/1h/1d/1w`, kaydın kendi saatine (saatli
+ * kayıtlarda `item.time`, tüm günlük kayıtlarda kullanıcının açıkça seçtiği
+ * `item.reminderAnchorTime`) göre hesaplanır — hiçbir zaman gizlice gece
+ * yarısı varsayılmaz. `custom`, tamamen bağımsız bir tarih+saat taşır.
+ */
+export interface AgendaReminder {
+  id: string;
+  kind: ReminderOffsetKind;
+  customDate?: DateKey;
+  customTime?: string;
+}
 
 export interface AgendaItem {
   id: string;
@@ -68,10 +85,19 @@ export interface AgendaItem {
   date: DateKey;
   /** "HH:mm" ya da null (tüm gün). */
   time: string | null;
+  /** İsteğe bağlı not. */
   description: string;
-  /** "HH:mm" ya da null; girilen tarihte bu saatte hatırlatma dener. */
-  reminder: string | null;
+  importance: AgendaImportance;
+  reminders: AgendaReminder[];
+  /**
+   * Tüm günlük kayıtlarda (time===null) offset tabanlı hatırlatmaların
+   * hesaplanacağı saat. Kullanıcı açıkça seçmeden offset hatırlatma
+   * eklenemez; null ise böyle bir hatırlatma henüz hesaplanamaz.
+   */
+  reminderAnchorTime: string | null;
   done: boolean;
+  /** done=true olduğu an; geri alınırsa null'a döner. */
+  completedAt: number | null;
   createdAt: number;
   updatedAt: number;
 }

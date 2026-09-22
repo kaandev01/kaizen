@@ -1,16 +1,20 @@
 import type { JSX } from 'preact';
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 import { addDays, dayLong, formatLongDate, isoWeekday, type DateKey } from '../core/dates';
+import { homeUpcoming } from '../core/agenda';
 import { planFor } from '../core/plan';
 import { amountOf, habitsForDay, summarize, type HabitDay } from '../core/progress';
 import { currentStreak } from '../core/streak';
+import type { AgendaItem } from '../core/types';
 import { MAX_AMOUNT } from '../core/validation';
+import { AgendaEditor } from './AgendaEditor';
+import { AgendaRow } from './AgendaRow';
 import { Icon, Ring, Sheet } from './components';
 import { HabitEditor } from './HabitEditor';
 import { useAppState, useStore, useToday } from './hooks';
 import { HabitIcon } from './icons';
 import { JournalPanel } from './JournalPanel';
-import { goToSettings } from './nav';
+import { goToAgendaList, goToSettings } from './nav';
 import { cancelHabitNotifications, haptic } from './platform';
 
 interface UndoToast {
@@ -156,6 +160,8 @@ export function TodayScreen() {
         </>
       )}
 
+      <UpcomingCard />
+
       {toast && (
         <div class="toast" role="status">
           <span>{toast.text}</span>
@@ -183,6 +189,36 @@ export function TodayScreen() {
         </Sheet>
       )}
     </section>
+  );
+}
+
+/**
+ * Ana ekranın "Yaklaşan" bölümü: kullanıcı Takvim'e hiç girmese de en fazla
+ * 3 tamamlanmamış deadline/etkinliği (gecikenler önce) burada görür. Kayıt
+ * yoksa hiçbir şey (büyük boş durum kartı YOK) render edilmez.
+ */
+function UpcomingCard() {
+  const store = useStore();
+  const { agenda } = useAppState();
+  const [openItem, setOpenItem] = useState<AgendaItem | null>(null);
+  const now = new Date();
+  const items = homeUpcoming(agenda, now, 3);
+  if (items.length === 0) return null;
+  return (
+    <div class="field upcoming-card">
+      <div class="row between">
+        <span class="label">Yaklaşan</span>
+        <button class="text-btn strong" onClick={goToAgendaList}>
+          Tümü
+        </button>
+      </div>
+      <ul class="agenda-list">
+        {items.map((item) => (
+          <AgendaRow key={item.id} item={item} now={now} onOpen={() => setOpenItem(item)} onToggleDone={() => store.setAgendaDone(item.id, !item.done)} showDate />
+        ))}
+      </ul>
+      {openItem && <AgendaEditor item={openItem} defaultDate={openItem.date} onClose={() => setOpenItem(null)} />}
+    </div>
   );
 }
 
