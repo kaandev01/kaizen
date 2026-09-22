@@ -1,18 +1,25 @@
 import { useEffect, useRef, useState } from 'preact/hooks';
+import { agendaRemindersBetween } from '../core/agenda';
 import { remindersBetween } from '../core/reminders';
+import { CalendarScreen } from './CalendarScreen';
 import { Icon } from './components';
 import { FocusScreen } from './FocusScreen';
 import { useAppState, useStore } from './hooks';
+import { setNavigate, type Tab } from './nav';
 import { beep, cancelPomodoroEnd, haptic, schedulePomodoroEnd, setWakeLock, showNotification } from './platform';
 import { SettingsScreen } from './SettingsScreen';
 import { TodayScreen } from './TodayScreen';
-
-type Tab = 'today' | 'focus' | 'settings';
 
 interface Notice {
   text: string;
   tab?: Tab;
 }
+
+const TABS: { id: Tab; label: string; icon: 'today' | 'hourglass' | 'calendar' }[] = [
+  { id: 'today', label: 'Bugün', icon: 'today' },
+  { id: 'focus', label: 'Odaklan', icon: 'hourglass' },
+  { id: 'calendar', label: 'Takvim', icon: 'calendar' },
+];
 
 export function App() {
   const store = useStore();
@@ -20,6 +27,8 @@ export function App() {
   const [tab, setTab] = useState<Tab>('today');
   const [notice, setNotice] = useState<Notice | null>(null);
   const noticeTimer = useRef<ReturnType<typeof setTimeout>>();
+
+  useEffect(() => setNavigate(setTab), []);
 
   const say = (n: Notice) => {
     setNotice(n);
@@ -90,7 +99,7 @@ export function App() {
     };
   }, [keepAwake]);
 
-  // ---- Alışkanlık hatırlatmaları (uygulama açıkken) ------------------------
+  // ---- Alışkanlık + ajanda hatırlatmaları (uygulama açıkken) -----------------
   useEffect(() => {
     let last = Date.now();
     const fired = new Set<string>();
@@ -99,7 +108,7 @@ export function App() {
       // Uzun uyku sonrası eski hatırlatmalar yığılmasın: en fazla son 2 dakika.
       const from = Math.max(last, now - 120_000);
       last = now;
-      const { habits, logs, settings } = store.getState();
+      const { habits, logs, agenda, settings } = store.getState();
       if (!settings.notifications) return;
       for (const r of remindersBetween(habits, logs, new Date(now), from, now)) {
         if (fired.has(r.id)) continue;
@@ -107,6 +116,13 @@ export function App() {
         const text = `${r.name} zamanı`;
         if (document.visibilityState === 'visible') say({ text, tab: 'today' });
         else void showNotification('Kaizen', text, `habit:${r.habitId}:${r.date}:${r.time}`);
+      }
+      for (const r of agendaRemindersBetween(agenda, from, now)) {
+        if (fired.has(r.id)) continue;
+        fired.add(r.id);
+        const text = `${r.title} zamanı`;
+        if (document.visibilityState === 'visible') say({ text, tab: 'calendar' });
+        else void showNotification('Kaizen', text, `agenda:${r.itemId}:${r.at}`);
       }
     };
     const id = setInterval(tick, 15_000);
@@ -138,17 +154,12 @@ export function App() {
       <main class="screen">
         {tab === 'today' && <TodayScreen />}
         {tab === 'focus' && <FocusScreen />}
+        {tab === 'calendar' && <CalendarScreen />}
         {tab === 'settings' && <SettingsScreen />}
       </main>
 
       <nav class="tabbar" aria-label="Ana menü">
-        {(
-          [
-            ['today', 'Bugün', 'today'],
-            ['focus', 'Odaklan', 'hourglass'],
-            ['settings', 'Ayarlar', 'sliders'],
-          ] as const
-        ).map(([id, label, icon]) => (
+        {TABS.map(({ id, label, icon }) => (
           <button key={id} class={tab === id ? 'on' : ''} aria-current={tab === id ? 'page' : undefined} onClick={() => setTab(id)}>
             <Icon name={icon} size={24} />
             <span>{label}</span>

@@ -5,3 +5,4 @@ shots
 *.log
 .DS_Store
 .claude
+verify-out

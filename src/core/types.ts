@@ -38,6 +38,64 @@ export interface DayLog {
   updatedAt: number;
 }
 
+// ---- Günlük (metin notu) ----------------------------------------------------
+/** Bir günün notlarından biri. Bir günde birden fazla not olabilir. */
+export interface JournalEntry {
+  id: string;
+  date: DateKey;
+  text: string;
+  /** Yalnızca bilgi amaçlı (sesle mi yazıldı). Ham ses hiçbir zaman saklanmaz. */
+  source: 'typed' | 'speech';
+  createdAt: number;
+  updatedAt: number;
+}
+
+// ---- Gün puanı ---------------------------------------------------------------
+/** Bir günün 1-10 arası puanı. Girilmemiş gün için kayıt hiç oluşturulmaz. */
+export interface DayRating {
+  date: DateKey;
+  score: number; // 1..10
+  updatedAt: number;
+}
+
+// ---- Takvim: deadline / etkinlik --------------------------------------------
+export type AgendaKind = 'deadline' | 'exam' | 'todo' | 'other';
+
+export interface AgendaItem {
+  id: string;
+  title: string;
+  kind: AgendaKind;
+  date: DateKey;
+  /** "HH:mm" ya da null (tüm gün). */
+  time: string | null;
+  description: string;
+  /** "HH:mm" ya da null; girilen tarihte bu saatte hatırlatma dener. */
+  reminder: string | null;
+  done: boolean;
+  createdAt: number;
+  updatedAt: number;
+}
+
+// ---- Aylık / yıllık hedefler --------------------------------------------------
+export type GoalPeriodKind = 'month' | 'year';
+/** month yalnızca kind==='month' iken kullanılır (1-12). */
+export interface GoalPeriod {
+  kind: GoalPeriodKind;
+  year: number;
+  month?: number;
+}
+export type GoalStatus = 'active' | 'done' | 'abandoned';
+
+export interface Goal {
+  id: string;
+  title: string;
+  description: string;
+  period: GoalPeriod;
+  status: GoalStatus;
+  createdAt: number;
+  updatedAt: number;
+}
+
 export type ThemeSetting = 'system' | 'light' | 'dark';
 
 export interface PomodoroConfig {

@@ -1,13 +1,42 @@
+import type { Backup } from '../core/backup';
 import { toDateKey, type Clock, type DateKey } from '../core/dates';
 import { withRevision } from '../core/plan';
 import * as pomo from '../core/pomodoro';
 import { amountOf, type LogMap } from '../core/progress';
-import { DEFAULT_SETTINGS, logKey, type DayLog, type Habit, type Settings } from '../core/types';
-import { clampAmount, normalizeHabitInput, sanitizePomodoroConfig, validateHabitInput, type HabitInput } from '../core/validation';
-import type { Storage } from './storage';
+import {
+  DEFAULT_SETTINGS,
+  logKey,
+  type AgendaItem,
+  type DayLog,
+  type DayRating,
+  type Goal,
+  type GoalPeriod,
+  type Habit,
+  type JournalEntry,
+  type Settings,
+} from '../core/types';
+import {
+  clampAmount,
+  isValidRating,
+  normalizeHabitInput,
+  sanitizePomodoroConfig,
+  validateAgendaInput,
+  validateGoalInput,
+  validateHabitInput,
+  validateJournalText,
+  type AgendaInput,
+  type GoalInput,
+  type HabitInput,
+} from '../core/validation';
+import type { FullSnapshot, Storage } from './storage';
 
-export const SCHEMA_VERSION = 1;
-const MAX_POMO_HISTORY = 2000;
+/**
+ * v1: habits/logs/settings/pomodoro/pomoHistory.
+ * v2: Pomodoro geçmişi zengin `PomoSession` kayıtlarına taşındı (kendi
+ * deposunda); günlük, gün puanı, ajanda ve hedefler eklendi. Geçiş `init()`
+ * içinde, mevcut kullanıcı verisi kaybedilmeden yapılır (bkz. aşağıdaki yorum).
+ */
+export const SCHEMA_VERSION = 2;
 
 export interface AppState {
   ready: boolean;
@@ -15,21 +44,15 @@ export interface AppState {
   logs: LogMap;
   settings: Settings;
   pomodoro: pomo.PomoState;
-  pomoHistory: pomo.PomoRecord[];
+  pomoSessions: pomo.PomoSession[];
+  journal: JournalEntry[];
+  /** Gün → puan; girilmemiş gün için kayıt yoktur. */
+  ratings: Record<DateKey, DayRating>;
+  agenda: AgendaItem[];
+  goals: Goal[];
   /** Kaydetme başarısız olduysa kullanıcıya gösterilecek mesaj. */
   persistError: string | null;
   storageKind: Storage['kind'];
-}
-
-export interface ExportData {
-  app: 'kaizen';
-  schemaVersion: number;
-  exportedAt: string;
-  habits: Habit[];
-  logs: DayLog[];
-  settings: Settings;
-  pomodoro: pomo.PomoState;
-  pomoHistory: pomo.PomoRecord[];
 }
 
 export function makeId(): string {
@@ -52,6 +75,22 @@ function mergeSettings(raw: unknown): Settings {
 }
 
 const validHabit = (h: Habit) => !!h && typeof h.id === 'string' && Array.isArray(h.revisions) && h.revisions.length > 0;
+const validJournalEntry = (e: JournalEntry) => !!e && typeof e.id === 'string' && typeof e.date === 'string' && typeof e.text === 'string';
+const validRating = (r: DayRating) => !!r && typeof r.date === 'string' && isValidRating(r.score);
+const validAgendaItem = (a: AgendaItem) => !!a && typeof a.id === 'string' && typeof a.date === 'string' && typeof a.title === 'string';
+const validGoal = (g: Goal) => !!g && typeof g.id === 'string' && typeof g.title === 'string' && !!g.period;
+
+/** Bekleyen (idle olmayan) bir pomodoro durumunu güvenle geri yükler; alan eksikse (eski şema) tamamlar. */
+function normalizePomoState(raw: unknown, fallback: pomo.PomoState): pomo.PomoState {
+  if (!raw || typeof raw !== 'object' || !('phase' in raw)) return fallback;
+  const p = raw as pomo.PomoState;
+  return {
+    ...p,
+    segments: Array.isArray(p.segments) ? p.segments : [],
+    startedAt: typeof p.startedAt === 'number' ? p.startedAt : null,
+    runningSince: typeof p.runningSince === 'number' ? p.runningSince : null,
+  };
+}
 
 export class Store {
   private state: AppState;
@@ -69,7 +108,11 @@ export class Store {
       logs: {},
       settings: DEFAULT_SETTINGS,
       pomodoro: pomo.initialPomo(DEFAULT_SETTINGS.pomodoro),
-      pomoHistory: [],
+      pomoSessions: [],
+      journal: [],
+      ratings: {},
+      agenda: [],
+      goals: [],
       persistError: null,
       storageKind: storage.kind,
     };
@@ -111,16 +154,34 @@ export class Store {
     const logs: LogMap = {};
     for (const l of snap.logs) logs[l.key] = l;
 
-    let pomodoro = pomo.initialPomo(settings.pomodoro);
-    const savedPomo = snap.meta.pomodoro as pomo.PomoState | undefined;
-    if (savedPomo && typeof savedPomo === 'object' && 'phase' in savedPomo) pomodoro = savedPomo;
-    const pomoHistory = Array.isArray(snap.meta.pomoHistory) ? (snap.meta.pomoHistory as pomo.PomoRecord[]) : [];
+    const schemaVersion = typeof snap.meta.schemaVersion === 'number' ? snap.meta.schemaVersion : 0;
+    let pomoSessions = snap.pomoSessions;
+    let pomodoroMeta = snap.meta.pomodoro;
 
-    this.state = { ...this.state, ready: true, habits, logs, settings, pomodoro, pomoHistory };
-    if (snap.meta.schemaVersion !== SCHEMA_VERSION) {
-      // Gelecekteki şema geçişleri burada, schemaVersion'a göre yapılır.
+    if (schemaVersion < SCHEMA_VERSION) {
+      if (schemaVersion < 2) {
+        // v1 → v2: eski meta.pomoHistory blobu yeni pomoSessions deposuna taşınır.
+        const existingIds = new Set(pomoSessions.map((s) => s.id));
+        const migrated = pomo.migrateLegacyPomoHistory(snap.meta.pomoHistory).filter((s) => !existingIds.has(s.id));
+        pomoSessions = [...pomoSessions, ...migrated];
+        for (const s of migrated) this.persist(() => this.storage.putPomoSession(s));
+        // Şema geçişinde o an sürmekte olan sayaç bırakılır: kalıcı kayıtlar (alışkanlıklar,
+        // günlük kayıtlar, tamamlanmış Pomodoro geçmişi) korunur; yalnızca canlı sayaç,
+        // hangi güne ait olduğu belirsiz sahte bir kayıt üretmemek için sıfırlanır.
+        const pm = pomodoroMeta as pomo.PomoState | undefined;
+        if (pm && (pm.status === 'running' || pm.status === 'paused')) pomodoroMeta = undefined;
+      }
       this.persist(() => this.storage.putMeta('schemaVersion', SCHEMA_VERSION));
     }
+
+    const pomodoro = normalizePomoState(pomodoroMeta, pomo.initialPomo(settings.pomodoro));
+    const journal = snap.journal.filter(validJournalEntry);
+    const ratings: Record<DateKey, DayRating> = {};
+    for (const r of snap.ratings.filter(validRating)) ratings[r.date] = r;
+    const agenda = snap.agenda.filter(validAgendaItem);
+    const goals = snap.goals.filter(validGoal);
+
+    this.state = { ...this.state, ready: true, habits, logs, settings, pomodoro, pomoSessions, journal, ratings, agenda, goals };
     // Uygulama kapalıyken biten aşamayı tamamla (tam bir kez).
     this.pomoSettle();
     this.listeners.forEach((l) => l());
@@ -205,15 +266,17 @@ export class Store {
     this.persist(() => this.storage.putMeta('pomodoro', pomodoro));
   }
 
-  // ---- pomodoro ----------------------------------------------------------
-  private setPomo(next: pomo.PomoState, record: pomo.PomoRecord | null = null) {
-    if (next === this.state.pomodoro && !record) return;
-    let pomoHistory = this.state.pomoHistory;
-    if (record && !pomoHistory.some((r) => r.id === record.id)) {
-      pomoHistory = [...pomoHistory, record].slice(-MAX_POMO_HISTORY);
-      this.persist(() => this.storage.putMeta('pomoHistory', pomoHistory));
+  // ---- pomodoro ------------------------------------------------------------
+  /** Pomodoro durumunu ve (varsa) yeni kalıcı seans kaydını birlikte uygular. */
+  private applyPomo(next: pomo.PomoState, record: pomo.PomoSession | null) {
+    let pomoSessions = this.state.pomoSessions;
+    if (record && !pomoSessions.some((s) => s.id === record.id)) {
+      // Aynı seans (runId) iki kez kaydedilmez — yeniden açılış/deneme güvenlidir.
+      pomoSessions = [...pomoSessions, record];
+      this.persist(() => this.storage.putPomoSession(record));
     }
-    this.set({ pomodoro: next, pomoHistory });
+    if (next === this.state.pomodoro && pomoSessions === this.state.pomoSessions) return;
+    this.set({ pomodoro: next, pomoSessions });
     this.persist(() => this.storage.putMeta('pomodoro', next));
   }
 
@@ -221,33 +284,170 @@ export class Store {
   pomoSettle(): boolean {
     const { state, record } = pomo.settle(this.state.pomodoro, this.state.settings.pomodoro, this.clock.now().getTime());
     if (state === this.state.pomodoro) return false;
-    this.setPomo(state, record);
+    this.applyPomo(state, record);
     return true;
   }
 
   pomoStart() {
     this.pomoSettle();
-    this.setPomo(pomo.start(this.state.pomodoro, this.clock.now().getTime(), this.genId()));
+    this.applyPomo(pomo.start(this.state.pomodoro, this.clock.now().getTime(), this.genId()), null);
   }
   pomoPause() {
     if (this.pomoSettle()) return; // zaten bitmişse duraklatma anlamsız
-    this.setPomo(pomo.pause(this.state.pomodoro, this.clock.now().getTime()));
+    this.applyPomo(pomo.pause(this.state.pomodoro, this.clock.now().getTime()), null);
   }
   pomoReset() {
-    this.setPomo(pomo.reset(this.state.pomodoro, this.state.settings.pomodoro));
+    const { state, record } = pomo.reset(this.state.pomodoro, this.state.settings.pomodoro, this.clock.now().getTime());
+    this.applyPomo(state, record);
   }
   pomoSelectPhase(phase: pomo.Phase) {
-    this.setPomo(pomo.selectPhase(this.state.pomodoro, this.state.settings.pomodoro, phase));
+    const { state, record } = pomo.selectPhase(this.state.pomodoro, this.state.settings.pomodoro, phase, this.clock.now().getTime());
+    this.applyPomo(state, record);
   }
   pomoSkipBreak() {
-    this.setPomo(pomo.skipBreak(this.state.pomodoro, this.state.settings.pomodoro));
+    const { state, record } = pomo.skipBreak(this.state.pomodoro, this.state.settings.pomodoro, this.clock.now().getTime());
+    this.applyPomo(state, record);
   }
   pomoDismissCompletion() {
-    this.setPomo(pomo.dismissCompletion(this.state.pomodoro));
+    this.applyPomo(pomo.dismissCompletion(this.state.pomodoro), null);
   }
 
-  // ---- yedek -------------------------------------------------------------
-  exportData(): ExportData {
+  // ---- günlük (journal) ------------------------------------------------------
+  addJournalEntry(date: DateKey, text: string, source: JournalEntry['source']): JournalEntry {
+    const err = validateJournalText(text);
+    if (err) throw new Error(err);
+    const now = this.clock.now().getTime();
+    const entry: JournalEntry = { id: this.genId(), date, text: text.trim(), source, createdAt: now, updatedAt: now };
+    this.set({ journal: [...this.state.journal, entry] });
+    this.persist(() => this.storage.putJournalEntry(entry));
+    return entry;
+  }
+
+  updateJournalEntry(id: string, text: string): JournalEntry {
+    const err = validateJournalText(text);
+    if (err) throw new Error(err);
+    const existing = this.state.journal.find((e) => e.id === id);
+    if (!existing) throw new Error('Not bulunamadı.');
+    const entry: JournalEntry = { ...existing, text: text.trim(), updatedAt: this.clock.now().getTime() };
+    this.set({ journal: this.state.journal.map((e) => (e.id === id ? entry : e)) });
+    this.persist(() => this.storage.putJournalEntry(entry));
+    return entry;
+  }
+
+  deleteJournalEntry(id: string): void {
+    this.set({ journal: this.state.journal.filter((e) => e.id !== id) });
+    this.persist(() => this.storage.removeJournalEntry(id));
+  }
+
+  // ---- gün puanı ---------------------------------------------------------------
+  /** `score=null` puanı temizler. Girilmemiş gün için hiçbir zaman 0 kaydı oluşturulmaz. */
+  setRating(date: DateKey, score: number | null): void {
+    if (score === null) {
+      if (!this.state.ratings[date]) return;
+      const ratings = { ...this.state.ratings };
+      delete ratings[date];
+      this.set({ ratings });
+      this.persist(() => this.storage.removeRating(date));
+      return;
+    }
+    if (!isValidRating(score)) throw new Error('Puan 1 ile 10 arasında bir tam sayı olmalı.');
+    const rating: DayRating = { date, score, updatedAt: this.clock.now().getTime() };
+    this.set({ ratings: { ...this.state.ratings, [date]: rating } });
+    this.persist(() => this.storage.putRating(rating));
+  }
+
+  // ---- ajanda (deadline / etkinlik) -------------------------------------------
+  addAgendaItem(input: AgendaInput): AgendaItem {
+    const err = validateAgendaInput(input);
+    if (err) throw new Error(err);
+    const now = this.clock.now().getTime();
+    const item: AgendaItem = {
+      id: this.genId(),
+      title: input.title.trim(),
+      kind: input.kind,
+      date: input.date,
+      time: input.time,
+      description: input.description.trim(),
+      reminder: input.reminder,
+      done: false,
+      createdAt: now,
+      updatedAt: now,
+    };
+    this.set({ agenda: [...this.state.agenda, item] });
+    this.persist(() => this.storage.putAgendaItem(item));
+    return item;
+  }
+
+  updateAgendaItem(id: string, input: AgendaInput): AgendaItem {
+    const err = validateAgendaInput(input);
+    if (err) throw new Error(err);
+    const existing = this.state.agenda.find((a) => a.id === id);
+    if (!existing) throw new Error('Kayıt bulunamadı.');
+    const item: AgendaItem = {
+      ...existing,
+      title: input.title.trim(),
+      kind: input.kind,
+      date: input.date,
+      time: input.time,
+      description: input.description.trim(),
+      reminder: input.reminder,
+      updatedAt: this.clock.now().getTime(),
+    };
+    this.set({ agenda: this.state.agenda.map((a) => (a.id === id ? item : a)) });
+    this.persist(() => this.storage.putAgendaItem(item));
+    return item;
+  }
+
+  setAgendaDone(id: string, done: boolean): void {
+    const existing = this.state.agenda.find((a) => a.id === id);
+    if (!existing || existing.done === done) return;
+    const item: AgendaItem = { ...existing, done, updatedAt: this.clock.now().getTime() };
+    this.set({ agenda: this.state.agenda.map((a) => (a.id === id ? item : a)) });
+    this.persist(() => this.storage.putAgendaItem(item));
+  }
+
+  deleteAgendaItem(id: string): void {
+    this.set({ agenda: this.state.agenda.filter((a) => a.id !== id) });
+    this.persist(() => this.storage.removeAgendaItem(id));
+  }
+
+  // ---- hedefler (aylık/yıllık) -------------------------------------------------
+  addGoal(input: GoalInput, period: GoalPeriod): Goal {
+    const err = validateGoalInput(input);
+    if (err) throw new Error(err);
+    const now = this.clock.now().getTime();
+    const goal: Goal = { id: this.genId(), title: input.title.trim(), description: input.description.trim(), period, status: 'active', createdAt: now, updatedAt: now };
+    this.set({ goals: [...this.state.goals, goal] });
+    this.persist(() => this.storage.putGoal(goal));
+    return goal;
+  }
+
+  updateGoal(id: string, input: GoalInput, period: GoalPeriod): Goal {
+    const err = validateGoalInput(input);
+    if (err) throw new Error(err);
+    const existing = this.state.goals.find((g) => g.id === id);
+    if (!existing) throw new Error('Hedef bulunamadı.');
+    const goal: Goal = { ...existing, title: input.title.trim(), description: input.description.trim(), period, updatedAt: this.clock.now().getTime() };
+    this.set({ goals: this.state.goals.map((g) => (g.id === id ? goal : g)) });
+    this.persist(() => this.storage.putGoal(goal));
+    return goal;
+  }
+
+  setGoalStatus(id: string, status: Goal['status']): void {
+    const existing = this.state.goals.find((g) => g.id === id);
+    if (!existing || existing.status === status) return;
+    const goal: Goal = { ...existing, status, updatedAt: this.clock.now().getTime() };
+    this.set({ goals: this.state.goals.map((g) => (g.id === id ? goal : g)) });
+    this.persist(() => this.storage.putGoal(goal));
+  }
+
+  deleteGoal(id: string): void {
+    this.set({ goals: this.state.goals.filter((g) => g.id !== id) });
+    this.persist(() => this.storage.removeGoal(id));
+  }
+
+  // ---- yedek: dışa aktar / geri yükle -----------------------------------------
+  exportData(): Backup {
     return {
       app: 'kaizen',
       schemaVersion: SCHEMA_VERSION,
@@ -256,8 +456,47 @@ export class Store {
       logs: Object.values(this.state.logs),
       settings: this.state.settings,
       pomodoro: this.state.pomodoro,
-      pomoHistory: this.state.pomoHistory,
+      pomoSessions: this.state.pomoSessions,
+      journal: this.state.journal,
+      ratings: Object.values(this.state.ratings),
+      agenda: this.state.agenda,
+      goals: this.state.goals,
     };
   }
 
+  /**
+   * Geçerli TÜM veriyi verilen yedeğin içeriğiyle değiştirir. Çağıran taraf
+   * (`parseBackup` ile) dosyayı önceden doğrulamış ve kullanıcıya onaylatmış
+   * olmalıdır — burada geri dönüş yoktur. Canlı Pomodoro sayacı geri
+   * yüklenmez (temiz/idle başlar): geçmişte kalmış bir sayaç durumunun bu anda
+   * tamamlanmış gibi görünüp sahte bir kayıt üretmesini engeller.
+   */
+  async restoreBackup(data: Backup): Promise<void> {
+    const habits = data.habits.filter(validHabit).sort((a, b) => a.order - b.order);
+    const logs: LogMap = {};
+    for (const l of data.logs) logs[l.key] = l;
+    const journal = data.journal.filter(validJournalEntry);
+    const ratings: Record<DateKey, DayRating> = {};
+    for (const r of data.ratings.filter(validRating)) ratings[r.date] = r;
+    const agenda = data.agenda.filter(validAgendaItem);
+    const goals = data.goals.filter(validGoal);
+    const settings = mergeSettings(data.settings);
+    const pomodoro = pomo.initialPomo(settings.pomodoro);
+    const pomoSessions = data.pomoSessions;
+
+    await this.flush(); // bekleyen eski yazmalar bitsin, sonra hepsini tek işlemde değiştir
+    const snapshot: FullSnapshot = {
+      habits,
+      logs: Object.values(logs),
+      pomoSessions,
+      journal,
+      ratings: Object.values(ratings),
+      agenda,
+      goals,
+      meta: { settings, pomodoro, schemaVersion: SCHEMA_VERSION },
+    };
+    await this.storage.replaceAll(snapshot);
+    this.state = { ...this.state, habits, logs, settings, pomodoro, pomoSessions, journal, ratings, agenda, goals, persistError: null };
+    this.listeners.forEach((l) => l());
+  }
 }
