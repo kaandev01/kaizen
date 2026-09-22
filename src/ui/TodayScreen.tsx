@@ -1,6 +1,6 @@
 import type { JSX } from 'preact';
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
-import { addDays, dayLong, formatLongDate, isoWeekday, type DateKey } from '../core/dates';
+import { addDays, dayLong, formatHomeDate, isoWeekday, type DateKey } from '../core/dates';
 import { homeUpcoming } from '../core/agenda';
 import { planFor } from '../core/plan';
 import { amountOf, habitsForDay, summarize, type HabitDay } from '../core/progress';
@@ -94,7 +94,7 @@ export function TodayScreen() {
     <section aria-labelledby="today-h">
       <header class="screen-head">
         <div>
-          <p class="eyebrow">{formatLongDate(today)}</p>
+          <p class="eyebrow">{formatHomeDate(today)}</p>
           <h1 id="today-h">Bugün</h1>
         </div>
         <div class="row gap">
@@ -232,15 +232,13 @@ function HabitRow(props: { row: HabitDay; today: DateKey; celebrating: boolean; 
   return (
     <li class={`habit ${row.done ? 'done' : ''} ${props.celebrating ? 'celebrate' : ''}`} style={{ '--c': row.habit.color } as JSX.CSSProperties}>
       <button class="habit-main" onClick={props.onOpen} aria-label={`${row.habit.name}, ${row.amount}/${row.target} ${row.unit}, ${streak} gün serisi${row.done ? ', tamamlandı' : ''}. Miktarı düzenle`}>
-        <span class="habit-icon" aria-hidden="true">
-          <HabitIcon icon={row.habit.icon} size={22} />
-        </span>
         <span class="habit-name">
           <span class="name-text">{row.habit.name}</span>
-          <span class={`streak ${streak === 0 ? 'zero' : ''}`} aria-hidden="true">
-            <Icon name="flame" size={14} />
-            {streak}
-          </span>
+          {streak > 0 && (
+            <span class="streak" aria-hidden="true">
+              {streak} gün
+            </span>
+          )}
         </span>
         <span class="habit-count" aria-hidden="true">
           <b>

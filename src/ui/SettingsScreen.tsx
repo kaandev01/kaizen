@@ -1,6 +1,7 @@
 import type { JSX } from 'preact';
 import { useRef, useState } from 'preact/hooks';
 import { parseBackup, type Backup, type BackupSummary } from '../core/backup';
+import { formatFullDateTime } from '../core/dates';
 import { buildIcs } from '../core/ics';
 import { currentRevision } from '../core/plan';
 import { upcomingReminders } from '../core/reminders';
@@ -9,7 +10,6 @@ import { ConfirmDialog, Icon, Segmented, Sheet, Switch } from './components';
 import { Durations } from './Durations';
 import { HabitEditor, PermissionNote, scheduleSummary } from './HabitEditor';
 import { useAppState, useStore } from './hooks';
-import { HabitIcon } from './icons';
 import { SCHEMA_VERSION } from '../storage/store';
 import { haptic, isIOS, isStandalone, notificationState, requestNotificationPermission, type PermState } from './platform';
 
@@ -207,9 +207,6 @@ export function SettingsScreen() {
           const rev = currentRevision(h);
           return (
             <button key={h.id} class="setting link" onClick={() => setEditId(h.id)} style={{ '--c': h.color } as JSX.CSSProperties}>
-              <span class="habit-icon sm" aria-hidden="true">
-                <HabitIcon icon={h.icon} size={18} />
-              </span>
               <span class="grow">
                 <span class="strong-text">{h.name}</span>
                 <span class="muted small block">
@@ -288,7 +285,7 @@ export function SettingsScreen() {
                   ))}
                 </tbody>
               </table>
-              <p class="muted small">Yedek tarihi: {new Date(pendingRestore.data.exportedAt).toLocaleString('tr-TR')}</p>
+              <p class="muted small">Yedek tarihi: {formatFullDateTime(new Date(pendingRestore.data.exportedAt).getTime())}</p>
             </>
           }
           confirmLabel="Geri Yükle"

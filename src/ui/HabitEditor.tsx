@@ -7,7 +7,7 @@ import type { Habit, Schedule } from '../core/types';
 import { MAX_TARGET, validateHabitInput, type HabitInput } from '../core/validation';
 import { ConfirmDialog, Icon, Segmented, Sheet, Switch } from './components';
 import { useStore } from './hooks';
-import { DEFAULT_HABIT_ICON, HABIT_ICON_KEYS, HabitIcon } from './icons';
+import { DEFAULT_HABIT_ICON } from './icons';
 import { cancelHabitNotifications, isIOS, isStandalone, notificationState, requestNotificationPermission, type PermState } from './platform';
 
 export const COLORS = ['#5a4bcf', '#2e9d63', '#b7832f', '#8f7ae8', '#d9534f', '#1f8fb5', '#d6409f', '#64748b'];
@@ -25,7 +25,9 @@ export function HabitEditor({ habit, onClose }: { habit?: Habit; onClose: () => 
   const rev = habit ? currentRevision(habit) : undefined;
 
   const [name, setName] = useState(habit?.name ?? '');
-  const [icon, setIcon] = useState(habit?.icon ?? DEFAULT_HABIT_ICON);
+  // Sembol seçimi arayüzden kaldırıldı (sadeleştirme); alan veri modelinde
+  // kalır ve mevcut kayıtların değeri korunur, yalnızca gösterilmez/değiştirilmez.
+  const icon = habit?.icon ?? DEFAULT_HABIT_ICON;
   const [color, setColor] = useState(habit?.color ?? COLORS[0]);
   const [target, setTarget] = useState(String(rev?.target ?? 1));
   const initialUnit = rev?.unit ?? 'kez';
@@ -100,14 +102,6 @@ export function HabitEditor({ habit, onClose }: { habit?: Habit; onClose: () => 
           </label>
 
           <div class="panel">
-            <span class="label" id="icon-l">Sembol</span>
-            <div class="icon-grid" role="radiogroup" aria-labelledby="icon-l">
-              {HABIT_ICON_KEYS.map((k) => (
-                <button key={k} role="radio" aria-checked={icon === k} aria-label={`Sembol: ${k}`} class={`sym ${icon === k ? 'on' : ''}`} onClick={() => setIcon(k)}>
-                  <HabitIcon icon={k} size={20} />
-                </button>
-              ))}
-            </div>
             <span class="label" id="color-l">Tema Tonu</span>
             <div class="color-row" role="radiogroup" aria-labelledby="color-l">
               {COLORS.map((c, idx) => (
