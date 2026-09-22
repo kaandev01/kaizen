@@ -87,7 +87,7 @@ kalıcı yazma başarısız olursa otomatik geri alınır ve kullanıcıya panel
 - **Tüm günlük bir kayıt kendi günü bitmeden gecikmiş sayılmaz**; saatli bir kayıt saatini geçince gecikmiş sayılır. Tamamlanan kayıtlar hiçbir zaman gecikmiş sayılmaz (`src/core/agenda.ts` → `isOverdue`).
 - Hatırlatmalar: 1 hafta/1 gün/1 saat önce, tam zamanında, özel tarih+saat — çoklu seçilebilir. **Tüm günlük bir kayıtta offset tabanlı hatırlatma eklemek için kullanıcı açıkça bir "hatırlatma saati" seçmek ZORUNDADIR** — hiçbir zaman gizlice gece yarısına düşmez (`reminderTriggerAt`, boş anchor'da `null` döner, hatırlatma planlanmaz). Geçmişte kalacak bir hatırlatma editörde açıkça işaretlenir.
 - Düzenleme/silme, hatırlatma zamanlamasını otomatik günceller (her hatırlatmanın anahtarı kayıt+hatırlatma+tetiklenme anına bağlıdır; bkz. `agendaRemindersBetween`); tamamlanma geri alınırsa gelecekteki hatırlatmalar tekrar geçerli olur.
-- **Bugün ekranı → Yaklaşan:** günlük ilerlemenin altında, en fazla 3 tamamlanmamış kayıt (gecikenler önce), her biri kısa bir aciliyet ifadesiyle ("Bugün 18.00", "Yarın", "3 gün kaldı", "2 gün gecikti"). Kayıt yoksa bölüm hiç render edilmez. "Tümü" → Takvim'i doğrudan Liste görünümünde açar.
+- **Bugün ekranı → Yaklaşan:** günlük ilerlemenin altında, en fazla 3 tamamlanmamış kayıt (gecikenler önce), her biri kısa bir aciliyet ifadesiyle ("Bugün 18:00", "Yarın", "3 gün kaldı", "2 gün gecikti"). Kayıt yoksa bölüm hiç render edilmez. "Tümü" → Takvim'i doğrudan Liste görünümünde açar.
 - **Liste görünümü:** Geciken / Bugün / Yaklaşan / Tamamlanan (varsayılan kapalı) gruplu, tüm ajandayı tarihten bağımsız gösterir.
 - Tekrarlayan etkinlikler ve harici takvim senkronizasyonu bu fazda **yok** (kapsam dışı, bilinçli).
 
