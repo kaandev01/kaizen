@@ -1,5 +1,5 @@
 import { formatClockTime, formatLongDate, type DateKey } from '../core/dates';
-import { formatDuration } from '../core/format';
+import { formatDuration, showUnit } from '../core/format';
 import { habitsForDay } from '../core/progress';
 import { focusStatsForDay, sessionsTouchingDay } from '../core/pomoStats';
 import { Sheet } from './components';
@@ -32,7 +32,8 @@ export function DayDetailSheet({ date, onClose }: { date: DateKey; onClose: () =
                 <li key={h.habit.id} class={`mini-habit ${h.done ? 'done' : ''}`} style={{ '--c': h.habit.color }}>
                   <span class="grow">{h.habit.name}</span>
                   <span class="muted small">
-                    {h.amount}/{h.target} {h.unit}
+                    {h.amount}/{h.target}
+                    {showUnit(h.unit) ? ` ${h.unit}` : ''}
                   </span>
                 </li>
               ))}

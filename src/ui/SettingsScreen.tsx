@@ -2,6 +2,7 @@ import type { JSX } from 'preact';
 import { useRef, useState } from 'preact/hooks';
 import { parseBackup, type Backup, type BackupSummary } from '../core/backup';
 import { formatFullDateTime } from '../core/dates';
+import { showUnit } from '../core/format';
 import { buildIcs } from '../core/ics';
 import { currentRevision } from '../core/plan';
 import { upcomingReminders } from '../core/reminders';
@@ -210,7 +211,8 @@ export function SettingsScreen() {
               <span class="grow">
                 <span class="strong-text">{h.name}</span>
                 <span class="muted small block">
-                  {rev.target} {rev.unit} · {scheduleSummary(rev.schedule)}
+                  {rev.target}
+                  {showUnit(rev.unit) ? ` ${rev.unit}` : ''} · {scheduleSummary(rev.schedule)}
                   {h.reminders.length ? ` · ${h.reminders.length} hatırlatma` : ''}
                 </span>
               </span>

@@ -1,14 +1,13 @@
-import type { JSX } from 'preact';
 import { useState } from 'preact/hooks';
 import { dayShort } from '../core/dates';
+import { showUnit } from '../core/format';
 import { currentRevision } from '../core/plan';
-import { isValidTime } from '../core/reminders';
 import type { Habit, Schedule } from '../core/types';
 import { MAX_TARGET, validateHabitInput, type HabitInput } from '../core/validation';
-import { ConfirmDialog, Icon, Segmented, Sheet, Switch } from './components';
+import { ConfirmDialog, Icon, Segmented, Sheet } from './components';
 import { useStore } from './hooks';
 import { DEFAULT_HABIT_ICON } from './icons';
-import { cancelHabitNotifications, isIOS, isStandalone, notificationState, requestNotificationPermission, type PermState } from './platform';
+import { cancelHabitNotifications, isIOS, isStandalone, type PermState } from './platform';
 
 export const COLORS = ['#5a4bcf', '#2e9d63', '#b7832f', '#8f7ae8', '#d9534f', '#1f8fb5', '#d6409f', '#64748b'];
 const UNITS = ['kez', 'bardak', 'sayfa', 'dk'];
@@ -28,16 +27,18 @@ export function HabitEditor({ habit, onClose }: { habit?: Habit; onClose: () => 
   // Sembol seçimi arayüzden kaldırıldı (sadeleştirme); alan veri modelinde
   // kalır ve mevcut kayıtların değeri korunur, yalnızca gösterilmez/değiştirilmez.
   const icon = habit?.icon ?? DEFAULT_HABIT_ICON;
-  const [color, setColor] = useState(habit?.color ?? COLORS[0]);
+  // Tema tonu seçimi arayüzden kaldırıldı (sadeleştirme); yeni alışkanlıklar
+  // uygulamanın ana rengini alır, mevcut kayıtların rengi değişmeden korunur.
+  const color = habit?.color ?? COLORS[0];
   const [target, setTarget] = useState(String(rev?.target ?? 1));
   const initialUnit = rev?.unit ?? 'kez';
   const [unitChoice, setUnitChoice] = useState(UNITS.includes(initialUnit) ? initialUnit : 'özel');
   const [customUnit, setCustomUnit] = useState(UNITS.includes(initialUnit) ? '' : initialUnit);
   const [scheduleKind, setScheduleKind] = useState<'daily' | 'weekdays'>(rev?.schedule.kind ?? 'daily');
   const [days, setDays] = useState<number[]>(rev?.schedule.kind === 'weekdays' ? rev.schedule.days : [1, 2, 3, 4, 5]);
-  const [remindersOn, setRemindersOn] = useState((habit?.reminders.length ?? 0) > 0);
-  const [times, setTimes] = useState<string[]>(habit?.reminders ?? []);
-  const [perm, setPerm] = useState<PermState>(notificationState());
+  // Hatırlatıcı arayüzden kaldırıldı (sadeleştirme); mevcut hatırlatmalar
+  // değiştirilmeden korunur, yeni alışkanlıklarda hiç ayarlanamaz.
+  const reminders = habit?.reminders ?? [];
   const [error, setError] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
 
@@ -51,7 +52,7 @@ export function HabitEditor({ habit, onClose }: { habit?: Habit; onClose: () => 
     target: targetNum,
     unit,
     schedule: scheduleKind === 'daily' ? { kind: 'daily' } : { kind: 'weekdays', days },
-    reminders: remindersOn ? times.filter(isValidTime) : [],
+    reminders,
   });
 
   const save = () => {
@@ -71,20 +72,6 @@ export function HabitEditor({ habit, onClose }: { habit?: Habit; onClose: () => 
   const stepTarget = (d: number) => setTarget(String(Math.min(MAX_TARGET, Math.max(1, (Number.isNaN(targetNum) ? 1 : targetNum) + d))));
   const toggleDay = (d: number) => setDays((cur) => (cur.includes(d) ? cur.filter((x) => x !== d) : [...cur, d].sort((a, b) => a - b)));
 
-  // İzin, kullanıcı hatırlatmayı etkinleştirirken istenir.
-  const toggleReminders = async (on: boolean) => {
-    setRemindersOn(on);
-    if (!on) return;
-    if (times.length === 0) setTimes(['09:00']);
-    if (notificationState() === 'default') setPerm(await requestNotificationPermission());
-  };
-  const addTime = () =>
-    setTimes((t) => {
-      const last = t[t.length - 1];
-      const next = last && isValidTime(last) ? `${String(Math.min(23, parseInt(last, 10) + 2)).padStart(2, '0')}:${last.slice(3)}` : '09:00';
-      return [...t, next];
-    });
-
   return (
     <>
       <Sheet title={habit ? 'Alışkanlığı Düzenle' : 'Yeni Alışkanlık'} onClose={onClose} tall action={{ label: 'Kaydet', onClick: save }}>
@@ -92,7 +79,7 @@ export function HabitEditor({ habit, onClose }: { habit?: Habit; onClose: () => 
           <label class="field">
             <span class="label">Alışkanlık Adı</span>
             <span class="input-wrap">
-              <input class="input" value={name} maxLength={40} placeholder="Örn. Su iç" onInput={(e) => setName(e.currentTarget.value)} />
+              <input class="input" value={name} maxLength={40} onInput={(e) => setName(e.currentTarget.value)} />
               {name && (
                 <button class="input-clear" aria-label="Adı temizle" onClick={() => setName('')}>
                   <Icon name="xCircle" size={20} />
@@ -100,17 +87,6 @@ export function HabitEditor({ habit, onClose }: { habit?: Habit; onClose: () => 
               )}
             </span>
           </label>
-
-          <div class="panel">
-            <span class="label" id="color-l">Tema Tonu</span>
-            <div class="color-row" role="radiogroup" aria-labelledby="color-l">
-              {COLORS.map((c, idx) => (
-                <button key={c} role="radio" aria-checked={color === c} aria-label={`Renk ${idx + 1}`} class={`dot-btn ${color === c ? 'on' : ''}`} style={{ '--c': c } as JSX.CSSProperties} onClick={() => setColor(c)}>
-                  <span class="dot-fill" />
-                </button>
-              ))}
-            </div>
-          </div>
 
           <div class="panel">
             <span class="label">Hedef Miktar ve Birim</span>
@@ -128,7 +104,7 @@ export function HabitEditor({ habit, onClose }: { habit?: Habit; onClose: () => 
                   onFocus={(e) => e.currentTarget.select()}
                   onInput={(e) => setTarget(e.currentTarget.value)}
                 />
-                <span class="target-unit">{unit || 'birim'}</span>
+                {showUnit(unit) && <span class="target-unit">{unit}</span>}
               </div>
               <button class="round-btn" aria-label="Hedefi artır" onClick={() => stepTarget(1)}>
                 <Icon name="plus" size={20} />
@@ -165,32 +141,6 @@ export function HabitEditor({ habit, onClose }: { habit?: Habit; onClose: () => 
               </div>
             )}
             {habit && <p class="hint">Hedef ve tekrar değişiklikleri bugünden itibaren geçerli olur; geçmiş günler eski düzenle korunur.</p>}
-          </div>
-
-          <div class="panel">
-            <div class="row between">
-              <span class="label">Hatırlatıcı</span>
-              <Switch label="Hatırlatıcı" checked={remindersOn} onChange={toggleReminders} />
-            </div>
-            {remindersOn && (
-              <>
-                <div class="times">
-                  {times.map((t, i) => (
-                    <span class="time-pill" key={i}>
-                      <Icon name="clock" size={16} />
-                      <input type="time" aria-label={`Hatırlatma saati ${i + 1}`} value={t} onInput={(e) => setTimes((cur) => cur.map((x, j) => (j === i ? e.currentTarget.value : x)))} />
-                      <button aria-label={`${t} hatırlatmasını kaldır`} onClick={() => setTimes((cur) => cur.filter((_, j) => j !== i))}>
-                        <Icon name="x" size={16} />
-                      </button>
-                    </span>
-                  ))}
-                  <button class="add-time" onClick={addTime}>
-                    <Icon name="plus" size={16} /> Saat Ekle
-                  </button>
-                </div>
-                <PermissionNote perm={perm} />
-              </>
-            )}
           </div>
 
           {error && (

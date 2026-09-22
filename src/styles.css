@@ -476,14 +476,6 @@ button:disabled {
   gap: 12px;
   margin: 4px 0 22px;
 }
-.hero-count {
-  color: var(--muted);
-}
-.hero-count b {
-  color: var(--text);
-  font-size: 1.1rem;
-  font-variant-numeric: tabular-nums;
-}
 .success-text {
   color: var(--success);
   font-weight: 650;
@@ -751,30 +743,6 @@ button:disabled {
   border-radius: var(--radius);
   background: var(--surface-2);
 }
-.color-row {
-  display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  justify-items: center;
-  gap: 6px;
-}
-.dot-btn {
-  width: 44px;
-  height: 44px;
-  display: grid;
-  place-items: center;
-  border-radius: 50%;
-  border: 2.5px solid transparent;
-  background: none;
-}
-.dot-fill {
-  width: 26px;
-  height: 26px;
-  border-radius: 50%;
-  background: var(--c);
-}
-.dot-btn.on {
-  border-color: var(--c);
-}
 .target-row {
   display: flex;
   align-items: center;
@@ -888,56 +856,6 @@ button:disabled {
 .day.on {
   background: var(--primary);
   color: var(--on-primary);
-}
-.times {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 8px;
-}
-.time-pill {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  padding: 0 2px 0 12px;
-  min-height: 44px;
-  border-radius: 22px;
-  background: var(--surface);
-  color: var(--primary-strong);
-}
-.time-pill input {
-  border: 0;
-  background: none;
-  font-size: 16px;
-  font-weight: 700;
-  color: var(--text);
-  min-width: 84px;
-  padding: 6px 2px;
-}
-.time-pill input::-webkit-calendar-picker-indicator {
-  display: none;
-}
-.time-pill button {
-  width: 36px;
-  height: 36px;
-  display: grid;
-  place-items: center;
-  border: 0;
-  border-radius: 50%;
-  background: none;
-  color: var(--muted);
-}
-.add-time {
-  min-height: 44px;
-  padding: 0 8px;
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  border: 0;
-  background: none;
-  color: var(--primary);
-  font-size: 16px;
-  font-weight: 600;
 }
 .delete-link {
   min-height: 48px;
