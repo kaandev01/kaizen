@@ -6,7 +6,11 @@ cihazdaki IndexedDB'de durur. **AI/LLM bağlantısı yok** — veri modeli gelec
 hazır tutulur (bkz. [Hafıza/dönemsel sorgular](#hafıza--dönemsel-sorgular-gelecekteki-ai-fazı-için)),
 ama bu sürümde hiçbir şey otomatik yorumlanmaz veya AI'ya gönderilmez.
 
-**Teknoloji:** Vite + TypeScript + Preact. Testler: Vitest. Mac/Xcode/Apple Developer üyeliği gerekmez.
+**Teknoloji:** Vite + TypeScript + Preact. Testler: Vitest. Web/PWA sürümü için Mac/Xcode/Apple Developer
+üyeliği gerekmez. iPhone'da **TestFlight/App Store** üzerinden native bir uygulama olarak kullanmak
+istersen (Capacitor ile) → [iOS / TestFlight](#ios--testflight-capacitor) bölümüne bak; derleme/imzalama
+Windows'tan da **bulut macOS**'ta (GitHub Actions) yapılır, kişisel bir Mac gerekmez — yalnızca Apple'ın
+kendi Developer Program üyeliği (99 $/yıl) zorunludur.
 
 ## Komutlar
 
@@ -142,7 +146,40 @@ katmanının üzerine kolayca inşa edilebileceği, test edilmiş bir sorgu katm
 | Kapalıyken hatırlatma için çözüm | *Ayarlar → Hatırlatmaları Takvim'e aktar (.ics)*: iPhone Takvim'ine tekrarlayan uyarılar ekler (yalnızca alışkanlıklar için); **kapalıyken/kilitliyken çalışır**. Kaldırdığın saatleri Takvim'den elle silmelisin. |
 | Titreşim | `navigator.vibrate` iOS'ta yok; iOS 17.4+ Safari için `<input switch>` hilesi kullanılır (belgesiz, cihazda doğrulanmalı) |
 
-**Gerçek arka plan bildirimi istersen** iki yol var: (a) küçük bir Web Push sunucusu (ör. Cloudflare Worker; hatırlatma saatleri sunucuya gider, "sunucusuz" ilkesi bozulur) veya (b) Mac + Xcode ile native/Capacitor sürümü.
+**Gerçek arka plan bildirimi istersen** iki yol var: (a) küçük bir Web Push sunucusu (ör. Cloudflare Worker; hatırlatma saatleri sunucuya gider, "sunucusuz" ilkesi bozulur) veya (b) aşağıdaki Capacitor/native sürümü — orada `@capacitor/local-notifications` ile uygulama kapalıyken de zamanlanmış bildirim **gerçekten mümkündür** (henüz uygulanmadı, bkz. aşağıdaki "Sonraki adım" listesi).
+
+## iOS / TestFlight (Capacitor)
+
+Kaizen'in aynı web kodu, [Capacitor](https://capacitorjs.com) ile bir iOS native uygulamasına
+sarmalanabilir (`ios/` klasörü — WKWebView tabanlı, `dist/`i olduğu gibi kullanır). Geliştirme
+**Windows'ta** yapılır; iOS derlemesi/imzalaması **yalnızca macOS'ta mümkün olduğu için** bulutta,
+GitHub'ın barındırılan macOS çalıştırıcısında (`.github/workflows/ios-testflight.yml`) yapılır —
+bu repo **public** olduğundan bu tamamen **ücretsiz**dir. Kişisel bir Mac hiç gerekmez.
+
+### Bir kerelik kurulum (kullanıcı yapar — hesap/ödeme/imzalama içerdiği için Claude yapamaz)
+
+1. **Apple Developer Program**'a kaydol: [developer.apple.com](https://developer.apple.com) — 99 $/yıl, Apple'ın kendi ücreti (hiçbir CI seçimi bunu değiştirmez).
+2. [App Store Connect](https://appstoreconnect.apple.com)'te yeni bir uygulama oluştur. Bundle ID = `capacitor.config.ts`'teki `com.kaandev.kaizen` (istersen App Store Connect'e kaydetmeden önce `capacitor.config.ts`'ten değiştirebilirsin — sonradan değiştirmek yeni bir uygulama kaydı gerektirir).
+3. App Store Connect → **Users and Access → Integrations → App Store Connect API**'den yeni bir anahtar oluştur. İndirilen `.p8` dosyasını **base64'e çevirip** (`base64 -i AuthKey_XXXX.p8` — Windows'ta PowerShell: `[Convert]::ToBase64String([IO.File]::ReadAllBytes("AuthKey_XXXX.p8"))`) GitHub reposu → **Settings → Secrets and variables → Actions**'a şu 4 secret olarak ekle (hiçbirini bana/sohbete yazma):
+   - `APP_STORE_CONNECT_API_KEY_ID`
+   - `APP_STORE_CONNECT_API_ISSUER_ID`
+   - `APP_STORE_CONNECT_API_KEY_CONTENT` (yukarıdaki base64 çıktısı)
+   - `APPLE_TEAM_ID` (App Store Connect → Membership'te görünür)
+4. GitHub'da **Actions → iOS TestFlight → Run workflow**'u elle çalıştır. İlk çalıştırma `ios/` klasörünü sıfırdan oluşturup repoya geri commit'ler VE ilk TestFlight derlemesini dener; imzalama ayarları ilk seferde nadiren kusursuz çalışır — log'da hata görürsen normaldir, birlikte düzeltilir.
+5. Kendi iPhone'unda **TestFlight** uygulamasından daveti kabul et.
+6. App Store'a göndermeye hazır olunca ürün sayfası (açıklama, ekran görüntüleri, gizlilik bilgileri) **App Store Connect** web arayüzünden doldurulur.
+
+### Nasıl çalışıyor
+- `ios-templates/` — `Fastfile`/`Appfile`/`Gemfile` şablonları; `ios/fastlane/` ilk çalıştırmada bunlardan oluşturulur (sonraki elle düzenlemeler korunur, üzerine yazılmaz).
+- İmzalama tamamen otomatik (`xcodebuild -allowProvisioningUpdates` + App Store Connect API anahtarı) — ayrı bir "match" sertifika deposu veya elle export edilen `.p12`/`.mobileprovision` GEREKMEZ.
+- `src/ui/native.ts` — `Capacitor.isNativePlatform()` sarmalayıcısı + e-posta doğrulama/şifre sıfırlama gibi dönüş bağlantıları için bir derin bağlantı (`appUrlOpen`) kancası. Web'de tamamen no-op; mevcut PWA davranışını değiştirmez.
+
+### Henüz uygulanmadı — sonraki adımlar (isteğe bağlı iyileştirmeler)
+Bu geçiş yalnızca "native sarmalayıcıyı çalışır hale getirmeyi" kapsıyor; aşağıdakiler ayrı, odaklı görevler olarak önerilir:
+- **Bildirimler** (en yüksek kazanç): `@capacitor/local-notifications` ile yukarıdaki tablodaki "uygulama kapalıyken bildirim yok" sınırı gerçekten aşılabilir; `platform.ts`'teki `showNotification`/`schedulePomodoroEnd` native sürümle değiştirilmeli.
+- **Titreşim**: `@capacitor/haptics` ile gerçek native titreşim (şu anki iOS Safari hack'inden daha güvenilir).
+- **Mikrofon/konuşma tanıma**: şu an iOS'ta zaten desteklenmiyor (yukarıya bakın) — Capacitor'a sarmalamak bunu bir GERİLEME yapmıyor; istenirse `@capacitor-community/speech-recognition` ile native tanıma eklenebilir.
+- Uygulama simgesi/açılış ekranı: `@capacitor/assets` ile mevcut `icon-192.png`/`icon-512.png`'den üretilir.
 
 ## Nerelerde düzenlenir
 
@@ -167,6 +204,9 @@ katmanının üzerine kolayca inşa edilebileceği, test edilmiş bir sorgu katm
 | Tarih/saat (tek nokta, test edilebilir) | `src/core/dates.ts` (`Clock`) |
 | Kalıcılık ve şema sürümü | `src/storage/storage.ts`, `store.ts` (`SCHEMA_VERSION`) |
 | Uygulama adı/simgesi | `vite.config.ts` (manifest), `index.html`, `scripts/make-icons.mjs` |
+| Capacitor (iOS native sarmalayıcı) ayarları | `capacitor.config.ts` |
+| Native köprü (derin bağlantı, `isNativePlatform`) | `src/ui/native.ts` |
+| iOS derleme/imzalama/TestFlight iş akışı | `.github/workflows/ios-testflight.yml`, `ios-templates/` |
 
 ## Tasarım notları (Stitch'ten sapmalar)
 - Alt menü üçe indirildi (**Bugün / Odaklan / Takvim**); Ayarlar artık her ekranın köşesindeki küçük dişli ikonuyla açılıyor, ayrı bir sekme değil.

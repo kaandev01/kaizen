@@ -1,0 +1,85 @@
+# iOS derlemesi + TestFlight yüklemesi — YALNIZCA macOS'ta mümkün olduğu için
+# GitHub'ın barındırılan macOS çalıştırıcısında koşar (bu repo public olduğundan
+# bu tamamen ücretsizdir). Elle tetiklenir (workflow_dispatch): her push'ta
+# otomatik çalışmaz — App Store Connect'te gereksiz build birikmesin diye.
+#
+# İlk çalıştırma `ios/` klasörünü SIFIRDAN oluşturur (`npx cap add ios` yalnızca
+# macOS'ta çalışabildiği için bu adım Windows'ta hiç yapılamaz) ve onu repoya
+# geri commit'ler; sonraki çalıştırmalar var olan `ios/`i kullanır (`cap sync`).
+#
+# Kurulum için kök README'deki "iOS / TestFlight" bölümüne bak — bu iş akışını
+# çalıştırmadan önce Apple Developer Program üyeliği + App Store Connect API
+# anahtarı (repo → Settings → Secrets and variables → Actions) gerekir.
+name: iOS TestFlight
+
+on:
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+concurrency:
+  group: ios-testflight-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+      - run: npm test
+      - run: npm run build
+
+      - name: ios/ klasörünü oluştur (yalnızca yoksa)
+        run: |
+          if [ ! -d "ios" ]; then
+            echo "ios/ yok — npx cap add ios ile oluşturuluyor (yalnızca macOS'ta mümkün)."
+            npx cap add ios
+          else
+            echo "ios/ zaten var, cap add atlanıyor."
+          fi
+
+      - name: Fastlane şablonlarını kopyala (yalnızca eksikse — elle yapılan değişiklikler korunur)
+        run: |
+          mkdir -p ios/fastlane
+          [ -f ios/fastlane/Fastfile ] || cp ios-templates/Fastfile ios/fastlane/Fastfile
+          [ -f ios/fastlane/Appfile ] || cp ios-templates/Appfile ios/fastlane/Appfile
+          [ -f ios/Gemfile ] || cp ios-templates/Gemfile ios/Gemfile
+
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: '3.3'
+          bundler-cache: true
+          working-directory: ios
+
+      - run: npx cap sync ios
+
+      - name: App Store Connect API anahtarını geçici dosyaya yaz
+        env:
+          APP_STORE_CONNECT_API_KEY_CONTENT: ${{ secrets.APP_STORE_CONNECT_API_KEY_CONTENT }}
+        run: |
+          echo "$APP_STORE_CONNECT_API_KEY_CONTENT" | base64 --decode > "$RUNNER_TEMP/AuthKey.p8"
+          echo "APP_STORE_CONNECT_API_KEY_PATH=$RUNNER_TEMP/AuthKey.p8" >> "$GITHUB_ENV"
+
+      - name: Derle ve TestFlight'a yükle (Fastlane)
+        working-directory: ios
+        env:
+          APP_STORE_CONNECT_API_KEY_ID: ${{ secrets.APP_STORE_CONNECT_API_KEY_ID }}
+          APP_STORE_CONNECT_API_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_API_ISSUER_ID }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: bundle exec fastlane ios beta
+
+      - name: Oluşturulan/güncellenen ios/ klasörünü repoya geri commit'le
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add ios
+          git diff --cached --quiet || git commit -m "iOS native projesini güncelle (otomatik, ios-testflight iş akışı)"
+          git push origin HEAD:${{ github.ref_name }}
