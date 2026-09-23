@@ -1,0 +1,45 @@
+# `ios/fastlane/Fastfile` olarak kopyalanır (bkz. bu klasördeki README.md).
+#
+# İmzalama: App Store Connect API anahtarıyla TAMAMEN otomatik ("Automatically
+# manage signing" + `xcodebuild -allowProvisioningUpdates`) — ayrı bir "match"
+# sertifika deposu ya da elle .p12/.mobileprovision export'u GEREKMEZ. Gereken
+# tek şey, .github/workflows/ios-testflight.yml'in GitHub Secrets'tan okuyup
+# ortam değişkeni olarak verdiği App Store Connect API bilgileridir.
+default_platform(:ios)
+
+platform :ios do
+  desc "Derler ve TestFlight'a yükler"
+  lane :beta do
+    key_id = ENV.fetch("APP_STORE_CONNECT_API_KEY_ID")
+    issuer_id = ENV.fetch("APP_STORE_CONNECT_API_ISSUER_ID")
+    key_path = ENV.fetch("APP_STORE_CONNECT_API_KEY_PATH") # iş akışı .p8'i buraya yazar
+    team_id = ENV.fetch("APPLE_TEAM_ID")
+    app_id = ENV["APP_IDENTIFIER"] || "com.kaandev.kaizen"
+
+    api_key = app_store_connect_api_key(
+      key_id: key_id,
+      issuer_id: issuer_id,
+      key_filepath: key_path,
+    )
+
+    # Build numarası: GitHub Actions'ın çalışma numarası (her çalıştırmada artar,
+    # App Store Connect aynı numarayı iki kez kabul etmez).
+    increment_build_number(
+      xcodeproj: "App/App.xcodeproj",
+      build_number: ENV["GITHUB_RUN_NUMBER"] || Time.now.strftime("%Y%m%d%H%M%S"),
+    )
+
+    build_app(
+      workspace: "App/App.xcworkspace",
+      scheme: "App",
+      export_method: "app-store",
+      export_options: { signingStyle: "automatic" },
+      xcargs: "-allowProvisioningUpdates -authenticationKeyPath #{key_path} -authenticationKeyID #{key_id} -authenticationKeyIssuerID #{issuer_id} DEVELOPMENT_TEAM=#{team_id}",
+    )
+
+    upload_to_testflight(
+      api_key: api_key,
+      skip_waiting_for_build_processing: true,
+    )
+  end
+end

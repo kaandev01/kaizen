@@ -5,9 +5,11 @@ import { openBestStorage } from './storage/storage';
 import { Store } from './storage/store';
 import { App } from './ui/App';
 import { setStore } from './ui/hooks';
+import { initNativeBridge, isNativePlatform } from './ui/native';
 import './styles.css';
 
 async function boot() {
+  initNativeBridge(); // native (Capacitor) sarmalayıcıda kancaları kurar; web'de no-op
   const root = document.getElementById('app')!;
   try {
     const { storage, fallbackReason } = await openBestStorage();
@@ -27,4 +29,6 @@ async function boot() {
 }
 
 void boot();
-registerSW({ immediate: true });
+// Service worker yalnızca web/PWA'da anlamlı — native (Capacitor) sarmalayıcıda
+// web varlıkları zaten uygulamayla birlikte paketlenir, ayrı bir SW'ye gerek yok.
+if (!isNativePlatform()) registerSW({ immediate: true });
