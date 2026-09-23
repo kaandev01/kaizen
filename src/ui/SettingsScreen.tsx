@@ -12,6 +12,18 @@ import { useAppState, useStore } from './hooks';
 import { HabitIcon } from './icons';
 import { SCHEMA_VERSION } from '../storage/store';
 import { haptic, isIOS, isStandalone, notificationState, requestNotificationPermission, type PermState } from './platform';
+import { useSessionUser } from './session';
+import { supabase } from '../sync/supabaseClient';
+import type { SyncStatus } from '../sync/types';
+import { useSyncStatus } from './syncStatus';
+
+const SYNC_STATUS_LABEL: Record<SyncStatus, string> = {
+  idle: 'Güncel',
+  pending: 'Bekliyor',
+  syncing: 'Gönderiliyor…',
+  error: 'Gönderilemedi, tekrar denenecek',
+  offline: 'Çevrimdışı',
+};
 
 const VERSION = '0.2.0';
 
@@ -53,6 +65,9 @@ export function SettingsScreen() {
   const store = useStore();
   const state = useAppState();
   const { settings } = state;
+  const user = useSessionUser();
+  const syncStatus = useSyncStatus();
+  const [signingOut, setSigningOut] = useState(false);
   const [perm, setPerm] = useState<PermState>(notificationState());
   const [editId, setEditId] = useState<string | null>(null);
   const [durationsOpen, setDurationsOpen] = useState(false);
@@ -110,6 +125,36 @@ export function SettingsScreen() {
         <div class="notice warn" role="alert">
           Bu tarayıcıda kalıcı depolama açılamadı; veriler uygulama kapanınca silinir. Özel gezinme modunu kapat.
         </div>
+      )}
+
+      {user && (
+        <>
+          <h2 class="group-title">Hesap</h2>
+          <div class="group">
+            <div class="setting">
+              <span class="grow">{user.email ?? 'Giriş yapıldı'}</span>
+            </div>
+            <div class="setting">
+              <span class="grow">
+                Senkronizasyon
+                <span class="muted small block">{SYNC_STATUS_LABEL[syncStatus]}</span>
+              </span>
+            </div>
+            <button
+              class="setting link"
+              disabled={signingOut}
+              onClick={async () => {
+                if (signingOut) return;
+                setSigningOut(true);
+                await supabase?.auth.signOut();
+                // Başarılıysa Root.tsx onAuthStateChange ile giriş ekranına döner; bu bileşen
+                // o sırada zaten unmount olacağı için setSigningOut(false) burada gerekmiyor.
+              }}
+            >
+              <span class="grow">{signingOut ? 'Çıkış yapılıyor…' : 'Çıkış Yap'}</span>
+            </button>
+          </div>
+        </>
       )}
 
       <h2 class="group-title">Görünüm</h2>

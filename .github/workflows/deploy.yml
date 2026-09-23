@@ -28,6 +28,13 @@ jobs:
       - run: npm ci
       - run: npm test
       - run: npm run build
+        env:
+          # Repo → Settings → Secrets and variables → Actions'a eklenir (bkz. README →
+          # "Bulut senkron / kullanıcı girişi" kurulumu). Tanımlı değilse uygulama
+          # bulutsuz modda derlenir — build kırılmaz, yalnızca giriş ekranı
+          # "yapılandırma eksik" uyarısı gösterir.
+          VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
+          VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
       - uses: actions/upload-pages-artifact@v3
         with:
           path: dist
