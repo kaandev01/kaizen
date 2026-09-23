@@ -30,6 +30,7 @@ import {
   type GoalInput,
   type HabitInput,
 } from '../core/validation';
+import type { OutboxOp } from '../sync/types';
 import type { FullSnapshot, Storage } from './storage';
 
 /** Bir yazma işleminin sonucu: kalıcı olarak gerçekten yazıldı mı (`saved` çözümlenince). */
@@ -104,6 +105,12 @@ export class Store {
   private state: AppState;
   private listeners = new Set<() => void>();
   private queue: Promise<void> = Promise.resolve();
+  /**
+   * Oturum açıkken `sync/engine.ts` tarafından ayarlanır: her yazımdan üretilen
+   * `OutboxOp`'u giden kuyruğa (IndexedDB) kalıcı olarak kaydeder. `null` iken
+   * (oturum yok) hiçbir şey buluta gitmez — uygulama tamamen eskisi gibi yerel çalışır.
+   */
+  private syncHook: ((op: OutboxOp) => Promise<void>) | null = null;
 
   constructor(
     private storage: Storage,
@@ -139,6 +146,11 @@ export class Store {
     this.listeners.forEach((l) => l());
   }
 
+  /** `sync/engine.ts` girişte çağırır (kuyruğu takip etmeye başlamak için); çıkışta `null` ile kapatılır. */
+  setSyncHook(hook: ((op: OutboxOp) => Promise<void>) | null): void {
+    this.syncHook = hook;
+  }
+
   /**
    * Yazma işlemini sıraya sokar (kalıcı hata durumunu her zamanki gibi genel
    * `persistError` bandına yansıtır) VE bu belirli çağrının gerçekten başarılı
@@ -146,9 +158,18 @@ export class Store {
    * beklemeden (fire-and-forget) kullanır — bu, kuyruğun sırasını bozmaz.
    * Anlık başarı/başarısızlığı bilmesi gereken çağıranlar (ör. bir formu
    * kapatmadan önce) sonucu await edebilir.
+   *
+   * `outboxOp` verilirse VE oturum açıksa (syncHook ayarlıysa), yerel yazma
+   * başarılı olduktan sonra aynı sırada (queue'nun parçası olarak, `flush()`
+   * hâlâ bunu da bekler) giden kuyruğa da yazılır — uygulama kapanmadan önce
+   * bir değişikliğin "kaydedildi ama hiç senkron kuyruğuna girmedi" diye
+   * kaybolmaması için.
    */
-  private persist(job: () => Promise<void>): Promise<boolean> {
-    const attempt = this.queue.then(job);
+  private persist(job: () => Promise<void>, outboxOp?: OutboxOp): Promise<boolean> {
+    const attempt = this.queue.then(async () => {
+      await job();
+      if (outboxOp && this.syncHook) await this.syncHook(outboxOp);
+    });
     this.queue = attempt.then(
       () => {
         if (this.state.persistError) this.set({ persistError: null });
@@ -225,7 +246,7 @@ export class Store {
       order: this.state.habits.reduce((m, h) => Math.max(m, h.order), -1) + 1,
     };
     this.set({ habits: [...this.state.habits, habit] });
-    this.persist(() => this.storage.putHabit(habit));
+    this.persist(() => this.storage.putHabit(habit), { table: 'habits', op: 'upsert', row: habit });
     return habit;
   }
 
@@ -246,33 +267,44 @@ export class Store {
       revisions: withRevision(existing, { target: i.target, unit: i.unit, schedule: i.schedule }, today),
     };
     this.set({ habits: this.state.habits.map((h) => (h.id === id ? habit : h)) });
-    this.persist(() => this.storage.putHabit(habit));
+    this.persist(() => this.storage.putHabit(habit), { table: 'habits', op: 'upsert', row: habit });
     return habit;
   }
 
-  /** Alışkanlığı ve tüm günlük kayıtlarını siler. */
+  /**
+   * Alışkanlığı ve tüm günlük kayıtlarını siler. Bulutta o alışkanlığa ait
+   * `day_logs` satırları bilinçli olarak silinmez (sahipsiz kalır, zararsız —
+   * `habit_id` artık hiçbir yerelde eşleşmediğinden hiçbir zaman görüntülenmez);
+   * bunun tek bedeli, gelecekte istenirse eklenebilecek küçük bir temizlik borcudur.
+   */
   deleteHabit(id: string): void {
     const logs: LogMap = {};
     for (const [k, l] of Object.entries(this.state.logs)) if (l.habitId !== id) logs[k] = l;
     this.set({ habits: this.state.habits.filter((h) => h.id !== id), logs });
-    this.persist(() => this.storage.removeHabit(id));
+    this.persist(() => this.storage.removeHabit(id), { table: 'habits', op: 'delete', id });
   }
 
   // ---- günlük miktar -----------------------------------------------------
-  /** Yeni miktarı kaydeder; önceki miktarı döndürür (geri alma için). */
+  /**
+   * Yeni miktarı kaydeder; önceki miktarı döndürür (geri alma için). Senkrona
+   * MUTLAK değer değil FARK (delta) gönderilir — iki cihazın art arda +1
+   * dokunuşları sunucuda birbirini silmesin diye (bkz. sync/types.ts).
+   */
   setAmount(habitId: string, date: DateKey, amount: number): number {
     const prev = amountOf(this.state.logs, habitId, date);
     const next = clampAmount(amount);
     if (next === prev) return prev;
     const key = logKey(habitId, date);
     const logs = { ...this.state.logs };
+    const updatedAt = this.clock.now().getTime();
+    const outboxOp: OutboxOp = { table: 'day_logs', op: 'delta', id: key, habitId, date, delta: next - prev, updatedAt };
     if (next === 0) {
       delete logs[key];
-      this.persist(() => this.storage.removeLog(key));
+      this.persist(() => this.storage.removeLog(key), outboxOp);
     } else {
-      const log: DayLog = { key, habitId, date, amount: next, updatedAt: this.clock.now().getTime() };
+      const log: DayLog = { key, habitId, date, amount: next, updatedAt };
       logs[key] = log;
-      this.persist(() => this.storage.putLog(log));
+      this.persist(() => this.storage.putLog(log), outboxOp);
     }
     this.set({ logs });
     return prev;
@@ -283,7 +315,9 @@ export class Store {
     const settings = mergeSettings({ ...this.state.settings, ...patch });
     const pomodoro = pomo.applyConfig(this.state.pomodoro, settings.pomodoro);
     this.set({ settings, pomodoro });
-    this.persist(() => this.storage.putMeta('settings', settings));
+    this.persist(() => this.storage.putMeta('settings', settings), { table: 'user_settings', op: 'upsert', row: settings });
+    // Canlı Pomodoro sayaç durumu (`pomodoro` meta'sı) bilinçli olarak senkronlanmaz —
+    // yalnızca TAMAMLANMIŞ seanslar (bkz. applyPomo) buluta gider.
     this.persist(() => this.storage.putMeta('pomodoro', pomodoro));
   }
 
@@ -294,10 +328,11 @@ export class Store {
     if (record && !pomoSessions.some((s) => s.id === record.id)) {
       // Aynı seans (runId) iki kez kaydedilmez — yeniden açılış/deneme güvenlidir.
       pomoSessions = [...pomoSessions, record];
-      this.persist(() => this.storage.putPomoSession(record));
+      this.persist(() => this.storage.putPomoSession(record), { table: 'pomo_sessions', op: 'upsert', row: record });
     }
     if (next === this.state.pomodoro && pomoSessions === this.state.pomoSessions) return;
     this.set({ pomodoro: next, pomoSessions });
+    // Canlı sayaç durumu senkronlanmaz (yukarıdaki not).
     this.persist(() => this.storage.putMeta('pomodoro', next));
   }
 
@@ -340,7 +375,7 @@ export class Store {
     const now = this.clock.now().getTime();
     const entry: JournalEntry = { id: this.genId(), date, text: text.trim(), source, createdAt: now, updatedAt: now };
     this.set({ journal: [...this.state.journal, entry] });
-    this.persist(() => this.storage.putJournalEntry(entry));
+    this.persist(() => this.storage.putJournalEntry(entry), { table: 'journal_entries', op: 'upsert', row: entry });
     return entry;
   }
 
@@ -351,13 +386,13 @@ export class Store {
     if (!existing) throw new Error('Not bulunamadı.');
     const entry: JournalEntry = { ...existing, text: text.trim(), updatedAt: this.clock.now().getTime() };
     this.set({ journal: this.state.journal.map((e) => (e.id === id ? entry : e)) });
-    this.persist(() => this.storage.putJournalEntry(entry));
+    this.persist(() => this.storage.putJournalEntry(entry), { table: 'journal_entries', op: 'upsert', row: entry });
     return entry;
   }
 
   deleteJournalEntry(id: string): void {
     this.set({ journal: this.state.journal.filter((e) => e.id !== id) });
-    this.persist(() => this.storage.removeJournalEntry(id));
+    this.persist(() => this.storage.removeJournalEntry(id), { table: 'journal_entries', op: 'delete', id });
   }
 
   // ---- gün puanı ---------------------------------------------------------------
@@ -368,13 +403,13 @@ export class Store {
       const ratings = { ...this.state.ratings };
       delete ratings[date];
       this.set({ ratings });
-      this.persist(() => this.storage.removeRating(date));
+      this.persist(() => this.storage.removeRating(date), { table: 'day_ratings', op: 'delete', date });
       return;
     }
     if (!isValidRating(score)) throw new Error('Puan 1 ile 10 arasında bir tam sayı olmalı.');
     const rating: DayRating = { date, score, updatedAt: this.clock.now().getTime() };
     this.set({ ratings: { ...this.state.ratings, [date]: rating } });
-    this.persist(() => this.storage.putRating(rating));
+    this.persist(() => this.storage.putRating(rating), { table: 'day_ratings', op: 'upsert', row: rating });
   }
 
   // ---- ajanda (deadline / etkinlik) -------------------------------------------
@@ -404,7 +439,7 @@ export class Store {
       updatedAt: now,
     };
     this.set({ agenda: [...this.state.agenda, item] });
-    const saved = this.persist(() => this.storage.putAgendaItem(item)).then((ok) => {
+    const saved = this.persist(() => this.storage.putAgendaItem(item), { table: 'agenda_items', op: 'upsert', row: item }).then((ok) => {
       if (!ok) this.set({ agenda: this.state.agenda.filter((a) => a.id !== item.id) });
       return ok;
     });
@@ -429,7 +464,7 @@ export class Store {
       updatedAt: this.clock.now().getTime(),
     };
     this.set({ agenda: this.state.agenda.map((a) => (a.id === id ? item : a)) });
-    const saved = this.persist(() => this.storage.putAgendaItem(item)).then((ok) => {
+    const saved = this.persist(() => this.storage.putAgendaItem(item), { table: 'agenda_items', op: 'upsert', row: item }).then((ok) => {
       if (!ok) this.set({ agenda: this.state.agenda.map((a) => (a.id === id ? existing : a)) });
       return ok;
     });
@@ -442,12 +477,12 @@ export class Store {
     if (!existing || existing.done === done) return;
     const item: AgendaItem = { ...existing, done, completedAt: done ? this.clock.now().getTime() : null, updatedAt: this.clock.now().getTime() };
     this.set({ agenda: this.state.agenda.map((a) => (a.id === id ? item : a)) });
-    this.persist(() => this.storage.putAgendaItem(item));
+    this.persist(() => this.storage.putAgendaItem(item), { table: 'agenda_items', op: 'upsert', row: item });
   }
 
   deleteAgendaItem(id: string): void {
     this.set({ agenda: this.state.agenda.filter((a) => a.id !== id) });
-    this.persist(() => this.storage.removeAgendaItem(id));
+    this.persist(() => this.storage.removeAgendaItem(id), { table: 'agenda_items', op: 'delete', id });
   }
 
   // ---- hedefler (aylık/yıllık) -------------------------------------------------
@@ -457,7 +492,7 @@ export class Store {
     const now = this.clock.now().getTime();
     const goal: Goal = { id: this.genId(), title: input.title.trim(), description: input.description.trim(), period, status: 'active', createdAt: now, updatedAt: now };
     this.set({ goals: [...this.state.goals, goal] });
-    this.persist(() => this.storage.putGoal(goal));
+    this.persist(() => this.storage.putGoal(goal), { table: 'goals', op: 'upsert', row: goal });
     return goal;
   }
 
@@ -468,7 +503,7 @@ export class Store {
     if (!existing) throw new Error('Hedef bulunamadı.');
     const goal: Goal = { ...existing, title: input.title.trim(), description: input.description.trim(), period, updatedAt: this.clock.now().getTime() };
     this.set({ goals: this.state.goals.map((g) => (g.id === id ? goal : g)) });
-    this.persist(() => this.storage.putGoal(goal));
+    this.persist(() => this.storage.putGoal(goal), { table: 'goals', op: 'upsert', row: goal });
     return goal;
   }
 
@@ -477,12 +512,105 @@ export class Store {
     if (!existing || existing.status === status) return;
     const goal: Goal = { ...existing, status, updatedAt: this.clock.now().getTime() };
     this.set({ goals: this.state.goals.map((g) => (g.id === id ? goal : g)) });
-    this.persist(() => this.storage.putGoal(goal));
+    this.persist(() => this.storage.putGoal(goal), { table: 'goals', op: 'upsert', row: goal });
   }
 
   deleteGoal(id: string): void {
     this.set({ goals: this.state.goals.filter((g) => g.id !== id) });
-    this.persist(() => this.storage.removeGoal(id));
+    this.persist(() => this.storage.removeGoal(id), { table: 'goals', op: 'delete', id });
+  }
+
+  // ---- uzak (bulut) değişikliklerini uygula -------------------------------
+  // `sync/engine.ts` başka bir cihazdan çekilen değişiklikleri bunlarla uygular.
+  // Yerel düzenleme metodlarından TEK farkı: `persist()`e outboxOp VERİLMEZ —
+  // aksi hâlde çektiğimiz veriyi hemen geri buluta göndeririz (sonsuz yankı).
+  // Bunun dışında aynı `set()`/`persist()` akışından geçtiği için App.tsx'in
+  // hatırlatma taraması gibi her şey mevcut davranışı otomatik miras alır.
+
+  applyRemoteHabit(id: string, habit: Habit | null): void {
+    if (habit) {
+      const exists = this.state.habits.some((h) => h.id === id);
+      this.set({ habits: exists ? this.state.habits.map((h) => (h.id === id ? habit : h)) : [...this.state.habits, habit] });
+      this.persist(() => this.storage.putHabit(habit));
+    } else {
+      const logs: LogMap = {};
+      for (const [k, l] of Object.entries(this.state.logs)) if (l.habitId !== id) logs[k] = l;
+      this.set({ habits: this.state.habits.filter((h) => h.id !== id), logs });
+      this.persist(() => this.storage.removeHabit(id));
+    }
+  }
+
+  applyRemoteLog(key: string, log: DayLog | null): void {
+    const logs = { ...this.state.logs };
+    if (log && log.amount > 0) {
+      logs[key] = log;
+      this.persist(() => this.storage.putLog(log));
+    } else {
+      delete logs[key];
+      this.persist(() => this.storage.removeLog(key));
+    }
+    this.set({ logs });
+  }
+
+  applyRemoteJournal(id: string, entry: JournalEntry | null): void {
+    if (entry) {
+      const exists = this.state.journal.some((e) => e.id === id);
+      this.set({ journal: exists ? this.state.journal.map((e) => (e.id === id ? entry : e)) : [...this.state.journal, entry] });
+      this.persist(() => this.storage.putJournalEntry(entry));
+    } else {
+      this.set({ journal: this.state.journal.filter((e) => e.id !== id) });
+      this.persist(() => this.storage.removeJournalEntry(id));
+    }
+  }
+
+  applyRemoteRating(date: DateKey, rating: DayRating | null): void {
+    if (rating) {
+      this.set({ ratings: { ...this.state.ratings, [date]: rating } });
+      this.persist(() => this.storage.putRating(rating));
+    } else {
+      const ratings = { ...this.state.ratings };
+      delete ratings[date];
+      this.set({ ratings });
+      this.persist(() => this.storage.removeRating(date));
+    }
+  }
+
+  applyRemoteAgenda(id: string, item: AgendaItem | null): void {
+    if (item) {
+      const normalized = normalizeAgendaItem(item);
+      const exists = this.state.agenda.some((a) => a.id === id);
+      this.set({ agenda: exists ? this.state.agenda.map((a) => (a.id === id ? normalized : a)) : [...this.state.agenda, normalized] });
+      this.persist(() => this.storage.putAgendaItem(normalized));
+    } else {
+      this.set({ agenda: this.state.agenda.filter((a) => a.id !== id) });
+      this.persist(() => this.storage.removeAgendaItem(id));
+    }
+  }
+
+  applyRemoteGoal(id: string, goal: Goal | null): void {
+    if (goal) {
+      const exists = this.state.goals.some((g) => g.id === id);
+      this.set({ goals: exists ? this.state.goals.map((g) => (g.id === id ? goal : g)) : [...this.state.goals, goal] });
+      this.persist(() => this.storage.putGoal(goal));
+    } else {
+      this.set({ goals: this.state.goals.filter((g) => g.id !== id) });
+      this.persist(() => this.storage.removeGoal(id));
+    }
+  }
+
+  applyRemoteSettings(patch: Partial<Settings>): void {
+    const settings = mergeSettings({ ...this.state.settings, ...patch });
+    const pomodoro = pomo.applyConfig(this.state.pomodoro, settings.pomodoro);
+    this.set({ settings, pomodoro });
+    this.persist(() => this.storage.putMeta('settings', settings));
+    this.persist(() => this.storage.putMeta('pomodoro', pomodoro));
+  }
+
+  /** Tamamlanmış Pomodoro seansları değişmezdir — yalnızca yerelde yoksa eklenir. */
+  applyRemotePomoSession(session: pomo.PomoSession): void {
+    if (this.state.pomoSessions.some((s) => s.id === session.id)) return;
+    this.set({ pomoSessions: [...this.state.pomoSessions, session] });
+    this.persist(() => this.storage.putPomoSession(session));
   }
 
   // ---- yedek: dışa aktar / geri yükle -----------------------------------------
@@ -524,6 +652,10 @@ export class Store {
     const pomoSessions = data.pomoSessions;
 
     await this.flush(); // bekleyen eski yazmalar bitsin, sonra hepsini tek işlemde değiştir
+    // Senkron için: değiştirmeden ÖNCEKİ durumu sakla — geri yükleme de (oturum açıksa)
+    // buluta yansıtılır (aşağıda, replaceAll'dan sonra `syncRestoreDiff` ile).
+    const prev = { habits: this.state.habits, logs: this.state.logs, journal: this.state.journal, ratings: this.state.ratings, agenda: this.state.agenda, goals: this.state.goals };
+
     const snapshot: FullSnapshot = {
       habits,
       logs: Object.values(logs),
@@ -537,5 +669,72 @@ export class Store {
     await this.storage.replaceAll(snapshot);
     this.state = { ...this.state, habits, logs, settings, pomodoro, pomoSessions, journal, ratings, agenda, goals, persistError: null };
     this.listeners.forEach((l) => l());
+
+    if (this.syncHook) await this.syncRestoreDiff(prev, { habits, logs, journal, ratings, agenda, goals, settings, pomoSessions });
+  }
+
+  /**
+   * Yedek geri yüklemesini (yalnızca oturum açıksa) buluta yansıtır: eskide olup
+   * yenide olmayan kayıtlar silinir, yenidekiler upsert edilir. `day_logs` yine
+   * delta olarak gönderilir (bu kez "eski yerel değer → yeni yerel değer" farkı) —
+   * her yerde aynı tek tekilleştirme/birleştirme kuralı geçerli kalsın diye.
+   */
+  private async syncRestoreDiff(
+    prev: { habits: Habit[]; logs: LogMap; journal: JournalEntry[]; ratings: Record<DateKey, DayRating>; agenda: AgendaItem[]; goals: Goal[] },
+    next: {
+      habits: Habit[];
+      logs: LogMap;
+      journal: JournalEntry[];
+      ratings: Record<DateKey, DayRating>;
+      agenda: AgendaItem[];
+      goals: Goal[];
+      settings: Settings;
+      pomoSessions: pomo.PomoSession[];
+    },
+  ): Promise<void> {
+    const hook = this.syncHook;
+    if (!hook) return;
+    const byId = <T extends { id: string }>(arr: T[]) => new Map(arr.map((x) => [x.id, x]));
+
+    const prevHabits = byId(prev.habits);
+    const nextHabits = byId(next.habits);
+    for (const h of next.habits) await hook({ table: 'habits', op: 'upsert', row: h });
+    for (const id of prevHabits.keys()) if (!nextHabits.has(id)) await hook({ table: 'habits', op: 'delete', id });
+
+    const logKeys = new Set([...Object.keys(prev.logs), ...Object.keys(next.logs)]);
+    for (const key of logKeys) {
+      const before = prev.logs[key]?.amount ?? 0;
+      const after = next.logs[key]?.amount ?? 0;
+      const delta = after - before;
+      if (delta === 0) continue;
+      const [habitId, date] = key.split('|');
+      await hook({ table: 'day_logs', op: 'delta', id: key, habitId, date, delta, updatedAt: next.logs[key]?.updatedAt ?? this.clock.now().getTime() });
+    }
+
+    const prevJournal = byId(prev.journal);
+    const nextJournal = byId(next.journal);
+    for (const e of next.journal) await hook({ table: 'journal_entries', op: 'upsert', row: e });
+    for (const id of prevJournal.keys()) if (!nextJournal.has(id)) await hook({ table: 'journal_entries', op: 'delete', id });
+
+    const ratingDates = new Set([...Object.keys(prev.ratings), ...Object.keys(next.ratings)]);
+    for (const date of ratingDates) {
+      const after = next.ratings[date];
+      if (after) await hook({ table: 'day_ratings', op: 'upsert', row: after });
+      else if (prev.ratings[date]) await hook({ table: 'day_ratings', op: 'delete', date });
+    }
+
+    const prevAgenda = byId(prev.agenda);
+    const nextAgenda = byId(next.agenda);
+    for (const a of next.agenda) await hook({ table: 'agenda_items', op: 'upsert', row: a });
+    for (const id of prevAgenda.keys()) if (!nextAgenda.has(id)) await hook({ table: 'agenda_items', op: 'delete', id });
+
+    const prevGoals = byId(prev.goals);
+    const nextGoals = byId(next.goals);
+    for (const g of next.goals) await hook({ table: 'goals', op: 'upsert', row: g });
+    for (const id of prevGoals.keys()) if (!nextGoals.has(id)) await hook({ table: 'goals', op: 'delete', id });
+
+    await hook({ table: 'user_settings', op: 'upsert', row: next.settings });
+    // pomo_sessions değişmez kayıtlardır; zaten var olanlar sunucuda no-op olur.
+    for (const s of next.pomoSessions) await hook({ table: 'pomo_sessions', op: 'upsert', row: s });
   }
 }

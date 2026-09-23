@@ -1,12 +1,14 @@
 # Kaizen
 
 Kişisel alışkanlık takibi + bağımsız Pomodoro + günlük + takvim/deadline + aylık-yıllık hedefler.
-iPhone'da ana ekrana eklenen çevrimdışı bir web uygulaması (PWA). Hesap ve sunucu yok; tüm veri
-cihazdaki IndexedDB'de durur. **AI/LLM bağlantısı yok** — veri modeli gelecekteki bir analiz fazına
-hazır tutulur (bkz. [Hafıza/dönemsel sorgular](#hafıza--dönemsel-sorgular-gelecekteki-ai-fazı-için)),
+iPhone'da ana ekrana eklenen çevrimdışı bir web uygulaması (PWA). Tüm veri her zaman önce cihazdaki
+IndexedDB'de durur (çevrimdışı çalışır); isteğe bağlı bir hesap/bulut senkron katmanı da var —
+bkz. [Bulut senkron / kullanıcı girişi](#bulut-senkron--kullanıcı-girişi). **AI/LLM bağlantısı yok** —
+veri modeli gelecekteki bir analiz fazına hazır tutulur (bkz. [Hafıza/dönemsel sorgular](#hafıza--dönemsel-sorgular-gelecekteki-ai-fazı-için)),
 ama bu sürümde hiçbir şey otomatik yorumlanmaz veya AI'ya gönderilmez.
 
-**Teknoloji:** Vite + TypeScript + Preact. Testler: Vitest. Mac/Xcode/Apple Developer üyeliği gerekmez.
+**Teknoloji:** Vite + TypeScript + Preact. Testler: Vitest. Bulut tarafı: Supabase (Auth + Postgres +
+Row Level Security). Mac/Xcode/Apple Developer üyeliği gerekmez.
 
 ## Komutlar
 
@@ -18,6 +20,29 @@ npm run typecheck    # TypeScript denetimi
 npm run build        # dist/ klasörüne üretim derlemesi (PWA + service worker dahil)
 npm run icons        # uygulama simgelerini yeniden üretir (scripts/make-icons.mjs)
 ```
+
+## Bulut senkron / kullanıcı girişi
+
+Giriş **zorunludur** — uygulama açılışta e-posta/şifre ile giriş/kayıt ister (bkz. `src/ui/AuthScreen.tsx`, `Root.tsx`). Mevcut cihazdaki veri kaybolmaz: ilk başarılı girişten sonra "bu cihazdaki verileri hesabına aktar" teklif edilir (bkz. `src/sync/migrate.ts`). Giriş sonrası tüm ekleme/düzenleme/silme, cihazda hızlı çalışmaya devam ederken (iyimser güncelleme, aynen eskisi gibi) arka planda bir giden kuyruk üzerinden buluta senkronlanır (`src/sync/engine.ts`) — çevrimdışıyken yapılan değişiklikler kuyrukta bekler, bağlantı gelince otomatik gönderilir; Ayarlar → Hesap'ta "Güncel / Gönderiliyor / Çevrimdışı" durumu görünür.
+
+**Kendi Supabase projeni kurman gerekiyor** (ücretsiz plan yeterli). Hiçbir gizli anahtar bu depoya veya sohbete girmez:
+
+1. [supabase.com](https://supabase.com)'da ücretsiz bir proje oluştur.
+2. Proje → **SQL Editor**'de `supabase/migrations/0001_init.sql` dosyasının **tamamını** yapıştırıp çalıştır (tablolar + Row Level Security politikaları + senkron fonksiyonunu tek seferde kurar).
+3. Proje → **Settings → API**'den `Project URL` ve `anon public` anahtarını al.
+4. Yerel geliştirme için: `.env.example`'ı `.env.local` olarak kopyala, iki değeri gir (`.env.local` asla commit edilmez).
+5. Yayınlanan (GitHub Pages) sürüm için: repo → **Settings → Secrets and variables → Actions**'a `VITE_SUPABASE_URL` ve `VITE_SUPABASE_ANON_KEY` olarak ekle (`ci.yml`/`deploy.yml` build adımında okunur).
+6. Supabase → **Authentication → URL Configuration**'da Site URL / Redirect URLs'e yayın adresini (`https://<kullanıcı>.github.io/<depo>/`) ekle — e-posta doğrulama/şifre sıfırlama bağlantıları oraya döner.
+
+Bu iki değer (`URL` + `anon key`) herkese açık/istemci-güvenli değerlerdir — Supabase'in tasarımı gereği tarayıcıda görünmeleri normaldir; gerçek güvenlik sınırı veritabanındaki Row Level Security politikalarıdır (her kullanıcı yalnızca kendi satırlarını okuyabilir/yazabilir). `.env.local`'e veya buraya **asla** `service_role` anahtarı ya da veritabanı şifresi girilmez.
+
+Bu adımlar tamamlanmadan uygulama **bulutsuz modda çalışmaya devam eder** — env değişkenleri boşsa `src/sync/supabaseClient.ts` `null` döner, giriş ekranı "yapılandırma eksik" uyarısı gösterir, derleme/testler kırılmaz.
+
+### Çakışma stratejisi
+- Alışkanlık günlük miktarları (+1/-1 dokunuşu ve doğrudan düzeltmeler): **delta (fark) olarak** gönderilir, sunucuda atomik olarak toplanır (`apply_day_log_delta`) — iki cihazın art arda artışları asla birbirini silmez. Bilinçli ödün: tam aynı anda iki cihazdan yapılan "mutlak" düzeltmeler toplamsal birleşir (sayaç-birleştirmede standart davranış).
+- Diğer her şey (alışkanlıklar, ajanda, günlük, gün puanı, hedefler, ayarlar): son yazan kazanır (sunucu zaman damgasına göre).
+- Silme **tombstone** (`deleted_at`) ile yapılır — eski bir cihaz bağlanınca silinen kayıt geri gelmez.
+- Aktif (çalışan) Pomodoro sayacı senkronlanmaz; yalnızca tamamlanmış/durdurulmuş seanslar buluta gider.
 
 ## iPhone'a kurulum
 
@@ -167,6 +192,9 @@ katmanının üzerine kolayca inşa edilebileceği, test edilmiş bir sorgu katm
 | Tarih/saat (tek nokta, test edilebilir) | `src/core/dates.ts` (`Clock`) |
 | Kalıcılık ve şema sürümü | `src/storage/storage.ts`, `store.ts` (`SCHEMA_VERSION`) |
 | Uygulama adı/simgesi | `vite.config.ts` (manifest), `index.html`, `scripts/make-icons.mjs` |
+| Giriş/kayıt ekranı, oturum yönlendirme | `src/ui/AuthScreen.tsx`, `src/ui/Root.tsx` |
+| Bulut şeması + RLS + senkron fonksiyonu | `supabase/migrations/0001_init.sql` |
+| Senkron motoru, yerel↔bulut eşleme, ilk aktarım | `src/sync/engine.ts`, `mapping.ts`, `migrate.ts`, `supabaseClient.ts`, `types.ts` |
 
 ## Tasarım notları (Stitch'ten sapmalar)
 - Alt menü üçe indirildi (**Bugün / Odaklan / Takvim**); Ayarlar artık her ekranın köşesindeki küçük dişli ikonuyla açılıyor, ayrı bir sekme değil.
