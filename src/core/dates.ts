@@ -91,6 +91,13 @@ export function formatDayMonth(key: DateKey): string {
   return `${d} ${MONTHS[m - 1]}`;
 }
 
+/** "12 Ekim" — yalnızca `refYear`'dan farklı bir yıldaysa yıl da eklenir: "12 Ekim 2027". */
+export function formatDayMonthMaybeYear(key: DateKey, refYear: number): string {
+  const [y, m, d] = key.split('-').map(Number);
+  const base = `${d} ${MONTHS[m - 1]}`;
+  return y === refYear ? base : `${base} ${y}`;
+}
+
 /** Bir zaman damgasını yerel "HH:mm" olarak biçimlendirir (24 saat, günlük/ajanda saatleri için). */
 export function formatClockTime(ms: number): string {
   const d = new Date(ms);
