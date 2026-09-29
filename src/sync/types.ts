@@ -1,3 +1,4 @@
+import type { Category } from '../core/categories';
 import type { PomoSession } from '../core/pomodoro';
 import type { AgendaItem, DayRating, Goal, Habit, JournalEntry, Settings } from '../core/types';
 
@@ -23,7 +24,9 @@ export type OutboxOp =
   | { table: 'agenda_items'; op: 'upsert'; row: AgendaItem }
   | { table: 'agenda_items'; op: 'delete'; id: string }
   | { table: 'goals'; op: 'upsert'; row: Goal }
-  | { table: 'goals'; op: 'delete'; id: string };
+  | { table: 'goals'; op: 'delete'; id: string }
+  | { table: 'categories'; op: 'upsert'; row: Category }
+  | { table: 'categories'; op: 'delete'; id: string };
 
 /** IndexedDB'deki `outbox` deposunda saklanan kayıt biçimi. */
 export interface OutboxEntry {

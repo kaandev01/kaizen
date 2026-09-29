@@ -15,6 +15,8 @@ export interface HabitInput {
   unit: string;
   schedule: Schedule;
   reminders: string[];
+  /** Bağlı Pomodoro kategorisi (isteğe bağlı) — bkz. `core/categories.ts`. */
+  linkedCategoryId: string | null;
 }
 
 /** Geçerliyse null, değilse Türkçe hata mesajı. */

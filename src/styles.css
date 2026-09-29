@@ -399,6 +399,12 @@ button:disabled {
   padding: 8px 10px;
   border-radius: 10px;
 }
+.hint.success {
+  color: var(--success);
+  background: var(--success-bg);
+  padding: 8px 10px;
+  border-radius: 10px;
+}
 .error {
   color: var(--danger);
   font-weight: 600;
@@ -821,6 +827,39 @@ button:disabled {
   background: var(--primary);
   color: var(--on-primary);
 }
+/* Kategori seçici (CategoryPicker) — renk seçimi için küçük dolu dairecikler. */
+.color-chip {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  border: 2px solid transparent;
+  background: var(--c);
+  padding: 0;
+}
+.color-chip.on {
+  border-color: var(--text);
+}
+.category-breadcrumb {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 2px;
+}
+.category-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.category-dot {
+  flex: none;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--c);
+}
 .segmented {
   display: inline-flex;
   padding: 4px;
@@ -1088,6 +1127,20 @@ button:disabled {
 .today-line b {
   color: var(--text);
   font-variant-numeric: tabular-nums;
+}
+.category-breakdown {
+  list-style: none;
+  margin: -6px 0 18px;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.category-breakdown li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 4px;
 }
 .collapsible {
   background: var(--surface);

@@ -3,6 +3,7 @@
  * Bulut şemasının tek doğruluk kaynağı `supabase/migrations/0001_init.sql`'dir;
  * buradaki alan adları onunla birebir eşleşmelidir.
  */
+import { GENERAL_CATEGORY_ID, type Category } from '../core/categories';
 import type { PomoSession } from '../core/pomodoro';
 import type { AgendaItem, DayRating, Goal, Habit, JournalEntry, Settings } from '../core/types';
 
@@ -19,6 +20,7 @@ export function habitToRow(userId: string, h: Habit) {
     revisions: h.revisions,
     created_at: h.createdAt,
     order: h.order,
+    linked_category_id: h.linkedCategoryId,
     deleted_at: null,
   };
 }
@@ -74,6 +76,19 @@ export function goalToRow(userId: string, g: Goal) {
   };
 }
 
+export function categoryToRow(userId: string, c: Category) {
+  return {
+    id: c.id,
+    user_id: userId,
+    name: c.name,
+    parent_id: c.parentId,
+    color: c.color,
+    order: c.order,
+    created_at: c.createdAt,
+    deleted_at: null,
+  };
+}
+
 export function settingsToRow(userId: string, s: Settings) {
   return {
     user_id: userId,
@@ -98,6 +113,7 @@ export function pomoSessionToRow(userId: string, s: PomoSession) {
     status: s.status,
     rating: s.rating,
     note: s.note,
+    category_id: s.categoryId,
   };
 }
 
@@ -114,6 +130,7 @@ export interface HabitRow {
   revisions: Habit['revisions'];
   created_at: string;
   order: number;
+  linked_category_id: string | null;
   deleted_at: string | null;
   server_updated_at: string;
 }
@@ -126,6 +143,7 @@ export const habitFromRow = (r: HabitRow): Habit => ({
   revisions: r.revisions,
   createdAt: r.created_at,
   order: r.order,
+  linkedCategoryId: r.linked_category_id ?? null,
 });
 
 export interface DayLogRow {
@@ -220,6 +238,25 @@ export const goalFromRow = (r: GoalRow): Goal => ({
   updatedAt: r.updated_at,
 });
 
+export interface CategoryRow {
+  id: string;
+  name: string;
+  parent_id: string | null;
+  color: string;
+  order: number;
+  created_at: number;
+  deleted_at: string | null;
+  server_updated_at: string;
+}
+export const categoryFromRow = (r: CategoryRow): Category => ({
+  id: r.id,
+  name: r.name,
+  parentId: r.parent_id,
+  color: r.color,
+  order: r.order,
+  createdAt: r.created_at,
+});
+
 export interface SettingsRow {
   theme: string;
   haptics: boolean;
@@ -248,6 +285,7 @@ export interface PomoSessionRow {
   status: string;
   rating: number | null;
   note: string | null;
+  category_id: string | null;
   server_updated_at: string;
 }
 export const pomoSessionFromRow = (r: PomoSessionRow): PomoSession => ({
@@ -260,4 +298,5 @@ export const pomoSessionFromRow = (r: PomoSessionRow): PomoSession => ({
   status: r.status === 'stopped' ? 'stopped' : 'completed',
   rating: typeof r.rating === 'number' ? r.rating : null,
   note: r.note ?? '',
+  categoryId: r.category_id ?? GENERAL_CATEGORY_ID,
 });

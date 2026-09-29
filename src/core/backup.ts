@@ -1,3 +1,4 @@
+import type { Category } from './categories';
 import { migrateLegacyPomoHistory, type PomoSession, type PomoState } from './pomodoro';
 import type { AgendaItem, DayLog, DayRating, Goal, Habit, JournalEntry, Settings } from './types';
 
@@ -15,6 +16,7 @@ export interface Backup {
   ratings: DayRating[];
   agenda: AgendaItem[];
   goals: Goal[];
+  categories: Category[];
 }
 
 export interface BackupSummary {
@@ -25,6 +27,7 @@ export interface BackupSummary {
   ratings: number;
   agenda: number;
   goals: number;
+  categories: number;
 }
 
 export type ParseResult = { ok: true; data: Backup; summary: BackupSummary } | { ok: false; error: string };
@@ -41,6 +44,7 @@ function summarize(d: Backup): BackupSummary {
     ratings: d.ratings.length,
     agenda: d.agenda.length,
     goals: d.goals.length,
+    categories: d.categories.length,
   };
 }
 
@@ -68,6 +72,12 @@ export function parseBackup(raw: unknown, currentSchemaVersion: number): ParseRe
     if (!Array.isArray(r.ratings)) r.ratings = [];
     if (!Array.isArray(r.agenda)) r.agenda = [];
     if (!Array.isArray(r.goals)) r.goals = [];
+    r.schemaVersion = 2; // ARA sürüm — bir sonraki göç bloğunun kendi denetimi doğru çalışsın diye currentSchemaVersion'a ATLANMAZ
+  }
+  // v2 → v3: kategoriler (klasör sistemi) bu yedekte hiç yoktu; "Genel" store.ts'in
+  // restoreBackup()'unda garanti edilir, burada yalnızca boş dizi olarak kabul edilir.
+  if ((r.schemaVersion as number) < 3) {
+    if (!Array.isArray(r.categories)) r.categories = [];
     r.schemaVersion = currentSchemaVersion;
   }
   if (!isArr(r.habits) || !r.habits.every((h) => hasStringId(h) && Array.isArray((h as Habit).revisions))) {
@@ -83,6 +93,7 @@ export function parseBackup(raw: unknown, currentSchemaVersion: number): ParseRe
     ['ratings', 'gün puanı'],
     ['agenda', 'ajanda'],
     ['goals', 'hedef'],
+    ['categories', 'kategori'],
   ] as const) {
     if (!isArr(r[key])) return { ok: false, error: `Yedek dosyasındaki ${label} verisi bozuk.` };
   }

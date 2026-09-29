@@ -35,6 +35,8 @@ export function App() {
   // Bir odak seansı yeni tamamlandığında bu, o seansın kimliğine (runId) ayarlanır —
   // PomoReviewSheet'i açar. Kısa mola/uzun mola tamamlanmasında hiç ayarlanmaz.
   const [reviewSessionId, setReviewSessionId] = useState<string | null>(null);
+  // Seansın kategorisine bağlı otomatik tiklenen alışkanlıkların adları (bilgi amaçlı, review formunda gösterilir).
+  const [autoTickedHabitNames, setAutoTickedHabitNames] = useState<string[]>([]);
 
   useEffect(() => setNavigate(setTab), []);
 
@@ -83,7 +85,12 @@ export function App() {
       haptic('success', state.settings.haptics);
       if (document.visibilityState === 'hidden') void showNotification('Kaizen', title, 'pomodoro-done');
       // Yalnızca gerçek odak (25 dk) seansı BİTTİĞİNDE değerlendirme/not sorulur — molalarda değil.
-      if (completed.phase === 'focus') setReviewSessionId(completed.runId);
+      if (completed.phase === 'focus') {
+        const session = state.pomoSessions.find((s) => s.id === completed.runId);
+        const ticked = session ? store.autoTickHabitsForCategory(session.categoryId) : [];
+        setAutoTickedHabitNames(ticked.map((h) => h.name));
+        setReviewSessionId(completed.runId);
+      }
     }
     if (tab !== 'focus') say({ text: title + '.', tab: 'focus' });
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -195,7 +202,16 @@ export function App() {
         ))}
       </nav>
 
-      {reviewSessionId && <PomoReviewSheet sessionId={reviewSessionId} onClose={() => setReviewSessionId(null)} />}
+      {reviewSessionId && (
+        <PomoReviewSheet
+          sessionId={reviewSessionId}
+          autoTickedHabitNames={autoTickedHabitNames}
+          onClose={() => {
+            setReviewSessionId(null);
+            setAutoTickedHabitNames([]);
+          }}
+        />
+      )}
     </div>
   );
 }

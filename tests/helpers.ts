@@ -28,6 +28,7 @@ export const habitInput = (over: Partial<HabitInput> = {}): HabitInput => ({
   unit: 'bardak',
   schedule: { kind: 'daily' },
   reminders: [],
+  linkedCategoryId: null,
   ...over,
 });
 

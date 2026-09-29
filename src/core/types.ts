@@ -27,6 +27,12 @@ export interface Habit {
   revisions: HabitRevision[];
   createdAt: DateKey;
   order: number;
+  /**
+   * İsteğe bağlı: bu alışkanlık bir Pomodoro kategorisine bağlıysa (bkz.
+   * `core/categories.ts`), o kategoride (ya da herhangi bir ALT kategorisinde)
+   * bir seans tamamlanınca bu alışkanlık otomatik "+1" tiklenir.
+   */
+  linkedCategoryId: string | null;
 }
 
 /** Bir alışkanlığın tek bir gündeki miktarı. */

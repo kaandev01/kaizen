@@ -1,5 +1,6 @@
 import { normalizeAgendaItem } from '../core/agenda';
 import type { Backup } from '../core/backup';
+import { ancestorIds, GENERAL_CATEGORY_ID, type Category } from '../core/categories';
 import { toDateKey, type Clock, type DateKey } from '../core/dates';
 import { withRevision } from '../core/plan';
 import * as pomo from '../core/pomodoro';
@@ -44,8 +45,11 @@ export interface Persisted<T> {
  * v2: Pomodoro geçmişi zengin `PomoSession` kayıtlarına taşındı (kendi
  * deposunda); günlük, gün puanı, ajanda ve hedefler eklendi. Geçiş `init()`
  * içinde, mevcut kullanıcı verisi kaybedilmeden yapılır (bkz. aşağıdaki yorum).
+ * v3: Pomodoro kategorileri (klasör sistemi) eklendi; yerleşik "Genel"
+ * kategorisi `init()` içinde bir kez oluşturulur, eski Pomodoro kayıtları
+ * ona atanır (`pomo.normalizePomoSession`).
  */
-export const SCHEMA_VERSION = 2;
+export const SCHEMA_VERSION = 3;
 
 export interface AppState {
   ready: boolean;
@@ -59,6 +63,8 @@ export interface AppState {
   ratings: Record<DateKey, DayRating>;
   agenda: AgendaItem[];
   goals: Goal[];
+  /** Pomodoro kategorileri (klasör sistemi) — "Genel" her zaman vardır. */
+  categories: Category[];
   /** Kaydetme başarısız olduysa kullanıcıya gösterilecek mesaj. */
   persistError: string | null;
   storageKind: Storage['kind'];
@@ -88,6 +94,12 @@ const validJournalEntry = (e: JournalEntry) => !!e && typeof e.id === 'string' &
 const validRating = (r: DayRating) => !!r && typeof r.date === 'string' && isValidRating(r.score);
 const validAgendaItem = (a: AgendaItem) => !!a && typeof a.id === 'string' && typeof a.date === 'string' && typeof a.title === 'string';
 const validGoal = (g: Goal) => !!g && typeof g.id === 'string' && typeof g.title === 'string' && !!g.period;
+const validCategory = (c: Category) => !!c && typeof c.id === 'string' && typeof c.name === 'string';
+
+/** `linkedCategoryId` şemaya sonradan eklendi — eski kayıtlarda yoktur. */
+function normalizeHabit(h: Habit): Habit {
+  return { ...h, linkedCategoryId: typeof h.linkedCategoryId === 'string' ? h.linkedCategoryId : null };
+}
 
 /** Bekleyen (idle olmayan) bir pomodoro durumunu güvenle geri yükler; alan eksikse (eski şema) tamamlar. */
 function normalizePomoState(raw: unknown, fallback: pomo.PomoState): pomo.PomoState {
@@ -128,6 +140,7 @@ export class Store {
       ratings: {},
       agenda: [],
       goals: [],
+      categories: [],
       persistError: null,
       storageKind: storage.kind,
     };
@@ -192,7 +205,7 @@ export class Store {
   async init(): Promise<void> {
     const snap = await this.storage.load();
     const settings = mergeSettings(snap.meta.settings);
-    const habits = snap.habits.filter(validHabit).sort((a, b) => a.order - b.order);
+    const habits = snap.habits.filter(validHabit).map(normalizeHabit).sort((a, b) => a.order - b.order);
     const logs: LogMap = {};
     for (const l of snap.logs) logs[l.key] = l;
 
@@ -224,7 +237,16 @@ export class Store {
     const agenda = snap.agenda.filter(validAgendaItem).map(normalizeAgendaItem);
     const goals = snap.goals.filter(validGoal);
 
-    this.state = { ...this.state, ready: true, habits, logs, settings, pomodoro, pomoSessions, journal, ratings, agenda, goals };
+    // "Genel" kategorisi her zaman var olmalı — ilk yükleme, eski (v3 öncesi) veri veya
+    // bir şekilde kayıp gitmiş olması ihtimaline karşı burada güvenle (yeniden) oluşturulur.
+    let categories = snap.categories.filter(validCategory);
+    if (!categories.some((c) => c.id === GENERAL_CATEGORY_ID)) {
+      const general: Category = { id: GENERAL_CATEGORY_ID, name: 'Genel', parentId: null, color: '#5a4bcf', order: 0, createdAt: this.clock.now().getTime() };
+      categories = [...categories, general];
+      this.persist(() => this.storage.putCategory(general), { table: 'categories', op: 'upsert', row: general });
+    }
+
+    this.state = { ...this.state, ready: true, habits, logs, settings, pomodoro, pomoSessions, journal, ratings, agenda, goals, categories };
     // Uygulama kapalıyken biten aşamayı tamamla (tam bir kez).
     this.pomoSettle();
     this.listeners.forEach((l) => l());
@@ -245,6 +267,7 @@ export class Store {
       revisions: [{ from: today, target: i.target, unit: i.unit, schedule: i.schedule }],
       createdAt: today,
       order: this.state.habits.reduce((m, h) => Math.max(m, h.order), -1) + 1,
+      linkedCategoryId: i.linkedCategoryId,
     };
     this.set({ habits: [...this.state.habits, habit] });
     this.persist(() => this.storage.putHabit(habit), { table: 'habits', op: 'upsert', row: habit });
@@ -266,6 +289,7 @@ export class Store {
       color: i.color,
       reminders: i.reminders,
       revisions: withRevision(existing, { target: i.target, unit: i.unit, schedule: i.schedule }, today),
+      linkedCategoryId: i.linkedCategoryId,
     };
     this.set({ habits: this.state.habits.map((h) => (h.id === id ? habit : h)) });
     this.persist(() => this.storage.putHabit(habit), { table: 'habits', op: 'upsert', row: habit });
@@ -370,6 +394,19 @@ export class Store {
   }
 
   /**
+   * Seçili Pomodoro kategorisini değiştirir (bkz. `PomoState.categoryId`).
+   * Arayüz `status !== 'idle'` iken seçiciyi devre dışı bırakarak bunu
+   * çalışan bir seansı bozmaktan korur (fazın `Segmented disabled={running}`
+   * deseniyle aynı) — burada ekstra bir kilit yok.
+   */
+  pomoSetCategory(categoryId: string): void {
+    const pomodoro = { ...this.state.pomodoro, categoryId };
+    this.set({ pomodoro });
+    // Canlı sayaç durumunun parçası — fazlar gibi yalnızca yerel, senkronlanmaz.
+    this.persist(() => this.storage.putMeta('pomodoro', pomodoro));
+  }
+
+  /**
    * Tamamlanmış bir Pomodoro seansına sonradan değerlendirme (0-10, isteğe
    * bağlı) ve/veya not ekler/günceller. Kayıt bulunamazsa sessizce hiçbir
    * şey yapmaz (seans bir şekilde silinmiş/erişilemez olabilir).
@@ -380,6 +417,86 @@ export class Store {
     const session: pomo.PomoSession = { ...existing, rating, note: note.trim() };
     this.set({ pomoSessions: this.state.pomoSessions.map((s) => (s.id === id ? session : s)) });
     this.persist(() => this.storage.putPomoSession(session), { table: 'pomo_sessions', op: 'upsert', row: session });
+  }
+
+  // ---- Pomodoro kategorileri (klasör sistemi) ---------------------------------
+  addCategory(input: { name: string; parentId: string | null; color: string }): Category {
+    const name = input.name.trim();
+    if (!name) throw new Error('Kategoriye bir isim ver.');
+    const category: Category = {
+      id: this.genId(),
+      name,
+      parentId: input.parentId,
+      color: input.color,
+      order: this.state.categories.filter((c) => c.parentId === input.parentId).reduce((m, c) => Math.max(m, c.order), -1) + 1,
+      createdAt: this.clock.now().getTime(),
+    };
+    this.set({ categories: [...this.state.categories, category] });
+    this.persist(() => this.storage.putCategory(category), { table: 'categories', op: 'upsert', row: category });
+    return category;
+  }
+
+  updateCategory(id: string, input: { name: string; color: string }): Category {
+    const existing = this.state.categories.find((c) => c.id === id);
+    if (!existing) throw new Error('Kategori bulunamadı.');
+    const name = input.name.trim();
+    if (!name) throw new Error('Kategoriye bir isim ver.');
+    if (id === GENERAL_CATEGORY_ID) throw new Error('"Genel" kategorisi yeniden adlandırılamaz.');
+    const category: Category = { ...existing, name, color: input.color };
+    this.set({ categories: this.state.categories.map((c) => (c.id === id ? category : c)) });
+    this.persist(() => this.storage.putCategory(category), { table: 'categories', op: 'upsert', row: category });
+    return category;
+  }
+
+  /**
+   * Alt kategorisi varsa reddedilir (önce onlar silinmeli/taşınmalı). Silinen
+   * kategoriye bağlı alışkanlıklar SİLİNMEZ, yalnızca bağlantısı kaldırılır;
+   * o kategorideki Pomodoro seansları "Genel"e taşınır — geçmiş asla kaybolmaz.
+   */
+  deleteCategory(id: string): void {
+    if (id === GENERAL_CATEGORY_ID) throw new Error('"Genel" kategorisi silinemez.');
+    if (!this.state.categories.some((c) => c.id === id)) return;
+    if (this.state.categories.some((c) => c.parentId === id)) throw new Error('Önce bu kategorinin alt kategorilerini sil.');
+
+    for (const h of this.state.habits) {
+      if (h.linkedCategoryId === id) {
+        const habit: Habit = { ...h, linkedCategoryId: null };
+        this.set({ habits: this.state.habits.map((x) => (x.id === h.id ? habit : x)) });
+        this.persist(() => this.storage.putHabit(habit), { table: 'habits', op: 'upsert', row: habit });
+      }
+    }
+    for (const s of this.state.pomoSessions) {
+      if (s.categoryId === id) {
+        const session: pomo.PomoSession = { ...s, categoryId: GENERAL_CATEGORY_ID };
+        this.set({ pomoSessions: this.state.pomoSessions.map((x) => (x.id === s.id ? session : x)) });
+        this.persist(() => this.storage.putPomoSession(session), { table: 'pomo_sessions', op: 'upsert', row: session });
+      }
+    }
+
+    this.set({ categories: this.state.categories.filter((c) => c.id !== id) });
+    this.persist(() => this.storage.removeCategory(id), { table: 'categories', op: 'delete', id });
+  }
+
+  /**
+   * Bir kategoride (veya herhangi bir ALT kategorisinde) bir Pomodoro seansı
+   * tamamlanınca çağrılır: kategorinin köke kadar tüm atalarını gezip, bunlardan
+   * herhangi birine bağlı (`linkedCategoryId`) her alışkanlığı otomatik "+1"
+   * tikler — tıpkı Bugün ekranındaki manuel dokunuş gibi (aynı mekanizma,
+   * dolayısıyla streak/halka/bildirim-iptali bedava gelir). Tetiklenen
+   * alışkanlıkları döndürür (App.tsx bunu değerlendirme formunda göstermek için kullanır).
+   */
+  autoTickHabitsForCategory(categoryId: string): Habit[] {
+    const chain = new Set(ancestorIds(this.state.categories, categoryId));
+    if (chain.size === 0) return [];
+    const today = toDateKey(this.clock.now());
+    const ticked: Habit[] = [];
+    for (const h of this.state.habits) {
+      if (!h.linkedCategoryId || !chain.has(h.linkedCategoryId)) continue;
+      const prev = amountOf(this.state.logs, h.id, today);
+      this.setAmount(h.id, today, prev + 1);
+      ticked.push(h);
+    }
+    return ticked;
   }
 
   // ---- günlük (journal) ------------------------------------------------------
@@ -612,6 +729,18 @@ export class Store {
     }
   }
 
+  /** "Genel" (`GENERAL_CATEGORY_ID`) hiçbir zaman uzaktan silinmez — bkz. `deleteCategory`'nin sunucu tarafındaki karşılığı da bunu asla göndermez. */
+  applyRemoteCategory(id: string, category: Category | null): void {
+    if (category) {
+      const exists = this.state.categories.some((c) => c.id === id);
+      this.set({ categories: exists ? this.state.categories.map((c) => (c.id === id ? category : c)) : [...this.state.categories, category] });
+      this.persist(() => this.storage.putCategory(category));
+    } else if (id !== GENERAL_CATEGORY_ID) {
+      this.set({ categories: this.state.categories.filter((c) => c.id !== id) });
+      this.persist(() => this.storage.removeCategory(id));
+    }
+  }
+
   applyRemoteSettings(patch: Partial<Settings>): void {
     const settings = mergeSettings({ ...this.state.settings, ...patch });
     const pomodoro = pomo.applyConfig(this.state.pomodoro, settings.pomodoro);
@@ -647,6 +776,7 @@ export class Store {
       ratings: Object.values(this.state.ratings),
       agenda: this.state.agenda,
       goals: this.state.goals,
+      categories: this.state.categories,
     };
   }
 
@@ -658,7 +788,7 @@ export class Store {
    * tamamlanmış gibi görünüp sahte bir kayıt üretmesini engeller.
    */
   async restoreBackup(data: Backup): Promise<void> {
-    const habits = data.habits.filter(validHabit).sort((a, b) => a.order - b.order);
+    const habits = data.habits.filter(validHabit).map(normalizeHabit).sort((a, b) => a.order - b.order);
     const logs: LogMap = {};
     for (const l of data.logs) logs[l.key] = l;
     const journal = data.journal.filter(validJournalEntry);
@@ -668,12 +798,25 @@ export class Store {
     const goals = data.goals.filter(validGoal);
     const settings = mergeSettings(data.settings);
     const pomodoro = pomo.initialPomo(settings.pomodoro);
-    const pomoSessions = data.pomoSessions.map(pomo.normalizePomoSession); // eski yedeklerde rating/note olmayabilir
+    const pomoSessions = data.pomoSessions.map(pomo.normalizePomoSession); // eski yedeklerde rating/note/categoryId olmayabilir
+    // Eski (kategori sisteminden önceki) bir yedekte "Genel" hiç olmayabilir; her zaman garanti edilir.
+    let categories = (data.categories ?? []).filter(validCategory);
+    if (!categories.some((c) => c.id === GENERAL_CATEGORY_ID)) {
+      categories = [...categories, { id: GENERAL_CATEGORY_ID, name: 'Genel', parentId: null, color: '#5a4bcf', order: 0, createdAt: this.clock.now().getTime() }];
+    }
 
     await this.flush(); // bekleyen eski yazmalar bitsin, sonra hepsini tek işlemde değiştir
     // Senkron için: değiştirmeden ÖNCEKİ durumu sakla — geri yükleme de (oturum açıksa)
     // buluta yansıtılır (aşağıda, replaceAll'dan sonra `syncRestoreDiff` ile).
-    const prev = { habits: this.state.habits, logs: this.state.logs, journal: this.state.journal, ratings: this.state.ratings, agenda: this.state.agenda, goals: this.state.goals };
+    const prev = {
+      habits: this.state.habits,
+      logs: this.state.logs,
+      journal: this.state.journal,
+      ratings: this.state.ratings,
+      agenda: this.state.agenda,
+      goals: this.state.goals,
+      categories: this.state.categories,
+    };
 
     const snapshot: FullSnapshot = {
       habits,
@@ -683,13 +826,14 @@ export class Store {
       ratings: Object.values(ratings),
       agenda,
       goals,
+      categories,
       meta: { settings, pomodoro, schemaVersion: SCHEMA_VERSION },
     };
     await this.storage.replaceAll(snapshot);
-    this.state = { ...this.state, habits, logs, settings, pomodoro, pomoSessions, journal, ratings, agenda, goals, persistError: null };
+    this.state = { ...this.state, habits, logs, settings, pomodoro, pomoSessions, journal, ratings, agenda, goals, categories, persistError: null };
     this.listeners.forEach((l) => l());
 
-    if (this.syncHook) await this.syncRestoreDiff(prev, { habits, logs, journal, ratings, agenda, goals, settings, pomoSessions });
+    if (this.syncHook) await this.syncRestoreDiff(prev, { habits, logs, journal, ratings, agenda, goals, categories, settings, pomoSessions });
   }
 
   /**
@@ -699,7 +843,7 @@ export class Store {
    * her yerde aynı tek tekilleştirme/birleştirme kuralı geçerli kalsın diye.
    */
   private async syncRestoreDiff(
-    prev: { habits: Habit[]; logs: LogMap; journal: JournalEntry[]; ratings: Record<DateKey, DayRating>; agenda: AgendaItem[]; goals: Goal[] },
+    prev: { habits: Habit[]; logs: LogMap; journal: JournalEntry[]; ratings: Record<DateKey, DayRating>; agenda: AgendaItem[]; goals: Goal[]; categories: Category[] },
     next: {
       habits: Habit[];
       logs: LogMap;
@@ -707,6 +851,7 @@ export class Store {
       ratings: Record<DateKey, DayRating>;
       agenda: AgendaItem[];
       goals: Goal[];
+      categories: Category[];
       settings: Settings;
       pomoSessions: pomo.PomoSession[];
     },
@@ -751,6 +896,11 @@ export class Store {
     const nextGoals = byId(next.goals);
     for (const g of next.goals) await hook({ table: 'goals', op: 'upsert', row: g });
     for (const id of prevGoals.keys()) if (!nextGoals.has(id)) await hook({ table: 'goals', op: 'delete', id });
+
+    const prevCategories = byId(prev.categories);
+    const nextCategories = byId(next.categories);
+    for (const c of next.categories) await hook({ table: 'categories', op: 'upsert', row: c });
+    for (const id of prevCategories.keys()) if (!nextCategories.has(id)) await hook({ table: 'categories', op: 'delete', id });
 
     await hook({ table: 'user_settings', op: 'upsert', row: next.settings });
     // pomo_sessions değişmez kayıtlardır; zaten var olanlar sunucuda no-op olur.
