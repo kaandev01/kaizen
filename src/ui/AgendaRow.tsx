@@ -1,4 +1,4 @@
-import { formatUrgencyPhrase, isOverdue, urgencyOf } from '../core/agenda';
+import { formatAgendaDateLabel, formatUrgencyPhrase, isOverdue, urgencyOf } from '../core/agenda';
 import { formatShortDate } from '../core/dates';
 import type { AgendaItem } from '../core/types';
 import { Icon } from './components';
@@ -9,11 +9,36 @@ const IMPORTANCE_LABEL = { normal: null, important: 'Önemli', critical: 'Kritik
  * Tüm ajanda listelerinde (Bugün → Yaklaşan, Takvim → seçili gün, Ajanda →
  * Liste) kullanılan tek satır. Yalnızca renkle durum anlatmaz: her zaman kısa
  * bir metin/ikon eşlik eder.
+ *
+ * `compactDate`: Ana ekranın "Yaklaşan" kartı gibi dar alanlarda, tarih +
+ * aciliyeti TEK bir sadeleştirilmiş etikette birleştirir ("29.09 · Bugün"
+ * yerine yalnızca "Bugün") — bkz. `formatAgendaDateLabel`. Diğer listeler
+ * (Takvim, Ajanda → Liste) `showDate`'in eski (tam tarih + ayrı aciliyet)
+ * davranışını korur.
  */
-export function AgendaRow({ item, now, onOpen, onToggleDone, showDate = false }: { item: AgendaItem; now: Date; onOpen: () => void; onToggleDone: () => void; showDate?: boolean }) {
+export function AgendaRow({
+  item,
+  now,
+  onOpen,
+  onToggleDone,
+  showDate = false,
+  compactDate = false,
+}: {
+  item: AgendaItem;
+  now: Date;
+  onOpen: () => void;
+  onToggleDone: () => void;
+  showDate?: boolean;
+  compactDate?: boolean;
+}) {
   const urgency = urgencyOf(item, now);
   const overdue = isOverdue(item, now);
   const importanceLabel = IMPORTANCE_LABEL[item.importance];
+  const meta = compactDate
+    ? item.done
+      ? 'Tamamlandı'
+      : formatAgendaDateLabel(item, now)
+    : `${showDate ? `${formatShortDate(item.date)} · ` : ''}${item.done ? 'Tamamlandı' : formatUrgencyPhrase(item, now)}${!item.time && !showDate ? ' · Tüm gün' : ''}`;
   return (
     <li class={`agenda-row ${item.done ? 'done' : ''} ${overdue ? 'overdue' : ''} urgency-${urgency}`}>
       <button
@@ -26,11 +51,7 @@ export function AgendaRow({ item, now, onOpen, onToggleDone, showDate = false }:
       <button class="agenda-main" onClick={onOpen}>
         <span class="agenda-main-text">
           <span class="agenda-title">{item.title}</span>
-          <span class="agenda-meta">
-            {showDate ? `${formatShortDate(item.date)} · ` : ''}
-            {item.done ? 'Tamamlandı' : formatUrgencyPhrase(item, now)}
-            {!item.time && !showDate ? ' · Tüm gün' : ''}
-          </span>
+          <span class="agenda-meta">{meta}</span>
         </span>
         {importanceLabel && !item.done && <span class={`importance-badge ${item.importance}`}>{importanceLabel}</span>}
       </button>

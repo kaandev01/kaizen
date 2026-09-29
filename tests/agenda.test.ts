@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   agendaForDay,
   agendaRemindersBetween,
+  formatAgendaDateLabel,
   formatUrgencyPhrase,
   groupAgenda,
   homeUpcoming,
@@ -92,6 +93,42 @@ describe('formatUrgencyPhrase', () => {
     expect(formatUrgencyPhrase(item({ date: '2026-09-22' }), now)).toBe('Yarın');
     expect(formatUrgencyPhrase(item({ date: '2026-09-24' }), now)).toBe('3 gün kaldı');
     expect(formatUrgencyPhrase(item({ date: '2026-09-19' }), now)).toBe('2 gün gecikti');
+  });
+});
+
+describe('formatAgendaDateLabel — "Yaklaşan" kartı için tek, sadeleştirilmiş etiket', () => {
+  it('bugün/yarın saatsiz', () => {
+    const now = new Date(2026, 8, 21, 9, 0);
+    expect(formatAgendaDateLabel(item({ date: '2026-09-21' }), now)).toBe('Bugün');
+    expect(formatAgendaDateLabel(item({ date: '2026-09-22' }), now)).toBe('Yarın');
+  });
+
+  it('bugün/yarın saatli — virgülle', () => {
+    const now = new Date(2026, 8, 21, 9, 0);
+    expect(formatAgendaDateLabel(item({ date: '2026-09-21', time: '18:00' }), now)).toBe('Bugün, 18:00');
+    expect(formatAgendaDateLabel(item({ date: '2026-09-22', time: '14:30' }), now)).toBe('Yarın, 14:30');
+  });
+
+  it('daha ileri tarihler: gün + Türkçe ay adı, yıl gösterilmez (aynı yıl)', () => {
+    const now = new Date(2026, 8, 21, 9, 0);
+    expect(formatAgendaDateLabel(item({ date: '2026-10-12' }), now)).toBe('12 Ekim');
+    expect(formatAgendaDateLabel(item({ date: '2026-10-12', time: '09:00' }), now)).toBe('12 Ekim, 09:00');
+  });
+
+  it('farklı yıldaki tarihlerde yıl da eklenir', () => {
+    const now = new Date(2026, 8, 21, 9, 0);
+    expect(formatAgendaDateLabel(item({ date: '2027-10-12' }), now)).toBe('12 Ekim 2027');
+  });
+
+  it('geçmiş (bugünden önceki) günler gün sayısıyla gecikmiş gösterilir', () => {
+    const now = new Date(2026, 8, 21, 9, 0);
+    expect(formatAgendaDateLabel(item({ date: '2026-09-19' }), now)).toBe('2 gün gecikti');
+  });
+
+  it('bugün saati geçmiş kayıt saat/dakika bazlı gecikmiş gösterilir', () => {
+    const now = new Date(2026, 8, 21, 12, 30);
+    expect(formatAgendaDateLabel(item({ date: '2026-09-21', time: '10:30' }), now)).toBe('2 saat gecikti');
+    expect(formatAgendaDateLabel(item({ date: '2026-09-21', time: '12:15' }), now)).toBe('15 dakika gecikti');
   });
 });
 
