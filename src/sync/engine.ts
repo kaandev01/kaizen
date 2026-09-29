@@ -48,7 +48,15 @@ export class SyncEngine {
   private pulling = false;
   private timer?: ReturnType<typeof setInterval>;
   private attached = false;
-  private status: SyncStatus = 'idle';
+  // `undefined` (henüz hiç bildirilmedi) BİLEREK gerçek bir SyncStatus değeri DEĞİL:
+  // aksi hâlde ilk gerçek durum (ör. boş kuyrukta 'idle') iç varsayılanla aynı çıkarsa
+  // `setStatus` "değişmedi" sanıp hiç bildirmez — arayüz kendi başlangıç değerinde
+  // (syncStatus.ts'teki 'offline') sonsuza dek takılı kalır. Gerçek bir hata yokken bile.
+  // `undefined` (henüz hiç bildirilmedi) BİLEREK gerçek bir SyncStatus değeri DEĞİL:
+  // aksi hâlde ilk gerçek durum (ör. boş kuyrukta 'idle') iç varsayılanla aynı çıkarsa
+  // `setStatus` "değişmedi" sanıp hiç bildirmez — arayüz kendi başlangıç değerinde
+  // (syncStatus.ts'teki 'offline') sonsuza dek takılı kalır. Gerçek bir hata yokken bile.
+  private status: SyncStatus | undefined = undefined;
 
   constructor(
     private storage: Storage,
