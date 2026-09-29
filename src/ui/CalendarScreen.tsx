@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 import { agendaForDay, isOverdue } from '../core/agenda';
-import { dayShort, toDateKey, type DateKey } from '../core/dates';
+import { dayShort, formatDayMonth, toDateKey, type DateKey } from '../core/dates';
 import { monthGrid } from '../core/periods';
 import type { AgendaItem } from '../core/types';
 import { AgendaEditor } from './AgendaEditor';
@@ -163,7 +163,7 @@ export function CalendarScreen() {
 
           <div class="selected-day">
             <div class="row between">
-              <span class="strong-text">{selected === today ? 'Bugün' : `${Number(selected.slice(8, 10))} ${MONTHS[Number(selected.slice(5, 7)) - 1]}`}</span>
+              <span class="strong-text">{selected === today ? 'Bugün' : formatDayMonth(selected)}</span>
               <div class="row gap-sm">
                 <button class="text-btn" onClick={() => setDayDetailOpen(true)}>
                   Gün detayı

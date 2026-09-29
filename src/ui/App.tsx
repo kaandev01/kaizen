@@ -7,6 +7,7 @@ import { FocusScreen } from './FocusScreen';
 import { useAppState, useStore } from './hooks';
 import { goToAgendaItem, setNavigate, type Tab } from './nav';
 import { beep, cancelPomodoroEnd, haptic, schedulePomodoroEnd, setWakeLock, showNotification } from './platform';
+import { PomoReviewSheet } from './PomoReviewSheet';
 import { SettingsScreen } from './SettingsScreen';
 import { TodayScreen } from './TodayScreen';
 
@@ -29,6 +30,9 @@ export function App() {
   const [tab, setTab] = useState<Tab>('today');
   const [notice, setNotice] = useState<Notice | null>(null);
   const noticeTimer = useRef<ReturnType<typeof setTimeout>>();
+  // Bir odak seansı yeni tamamlandığında bu, o seansın kimliğine (runId) ayarlanır —
+  // PomoReviewSheet'i açar. Kısa mola/uzun mola tamamlanmasında hiç ayarlanmaz.
+  const [reviewSessionId, setReviewSessionId] = useState<string | null>(null);
 
   useEffect(() => setNavigate(setTab), []);
 
@@ -76,6 +80,8 @@ export function App() {
       if (!state.settings.silent) beep();
       haptic('success', state.settings.haptics);
       if (document.visibilityState === 'hidden') void showNotification('Kaizen', title, 'pomodoro-done');
+      // Yalnızca gerçek odak (25 dk) seansı BİTTİĞİNDE değerlendirme/not sorulur — molalarda değil.
+      if (completed.phase === 'focus') setReviewSessionId(completed.runId);
     }
     if (tab !== 'focus') say({ text: title + '.', tab: 'focus' });
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -178,6 +184,8 @@ export function App() {
           </button>
         ))}
       </nav>
+
+      {reviewSessionId && <PomoReviewSheet sessionId={reviewSessionId} onClose={() => setReviewSessionId(null)} />}
     </div>
   );
 }

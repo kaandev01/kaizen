@@ -39,6 +39,8 @@ describe('Pomodoro durum makinesi', () => {
       activeMs: 25 * MIN,
       segments: [{ start: T0, end: T0 + 25 * MIN }],
       status: 'completed',
+      rating: null,
+      note: '',
     });
     expect(r1.state).toMatchObject({ phase: 'short', status: 'idle', cycleCount: 1, remainingMs: 5 * MIN });
     expect(r1.state.lastCompleted).toMatchObject({ phase: 'focus', runId: 'r1' });
@@ -112,6 +114,8 @@ describe('Pomodoro durum makinesi', () => {
       activeMs: 12 * MIN, // yalnızca gerçekten çalışılan süre
       segments: [{ start: T0, end: T0 + 12 * MIN }],
       status: 'stopped',
+      rating: null,
+      note: '',
     });
     expect(state).toMatchObject({ status: 'idle', phase: 'focus', cycleCount: 0, remainingMs: 25 * MIN, runId: '' });
     // 'stopped' kayıt tamamlanan sayısına (cycleCount) hiçbir şekilde eklenmez.
@@ -218,6 +222,8 @@ describe('Pomodoro kalıcılık ve yeniden açılış (Store)', () => {
       activeMs: 25 * MIN,
       segments: [{ start: running.startedAt!, end: running.endsAt! }],
       status: 'completed',
+      rating: null,
+      note: '',
     });
     clock.advanceMs(30 * MIN);
     const b = await makeStore(clock, storage);
@@ -262,7 +268,7 @@ describe('şema göçü: v1 pomoHistory → v2 pomoSessions', () => {
     await storage.putMeta('pomoHistory', [{ id: 'eski-1', at: T0 + 25 * MIN, ms: 25 * MIN }]);
     const { store } = await makeStore(new FakeClock(2026, 9, 21), storage);
     expect(store.getState().pomoSessions).toEqual([
-      { id: 'eski-1', plannedMs: 25 * MIN, startedAt: T0, endedAt: T0 + 25 * MIN, activeMs: 25 * MIN, segments: [{ start: T0, end: T0 + 25 * MIN }], status: 'completed' },
+      { id: 'eski-1', plannedMs: 25 * MIN, startedAt: T0, endedAt: T0 + 25 * MIN, activeMs: 25 * MIN, segments: [{ start: T0, end: T0 + 25 * MIN }], status: 'completed', rating: null, note: '' },
     ]);
     await store.flush();
     const snap = await storage.load();
@@ -296,5 +302,69 @@ describe('şema göçü: v1 pomoHistory → v2 pomoSessions', () => {
     const { store } = await makeStore(new FakeClock(2026, 9, 21), storage);
     expect(store.getState().pomodoro.status).toBe('idle'); // yarım kalan canlı seans bırakıldı
     expect(store.getState().pomoSessions).toHaveLength(1); // ama geçmiş kaybolmadı
+  });
+});
+
+describe('Seans değerlendirmesi (rating/not)', () => {
+  it('yeni tamamlanan bir seansta rating/not varsayılan olarak boştur', async () => {
+    const clock = new FakeClock(2026, 9, 21, 9, 0);
+    const storage = new MemoryStorage();
+    const { store } = await makeStore(clock, storage);
+    store.pomoStart();
+    clock.advanceMs(25 * MIN);
+    store.pomoSettle();
+    const [s] = store.getState().pomoSessions;
+    expect(s).toMatchObject({ rating: null, note: '' });
+  });
+
+  it('setPomoSessionReview doğru seansı günceller, boşluk kırpılır ve kalıcıdır', async () => {
+    const clock = new FakeClock(2026, 9, 21, 9, 0);
+    const storage = new MemoryStorage();
+    const a = await makeStore(clock, storage);
+    a.store.pomoStart();
+    clock.advanceMs(25 * MIN);
+    a.store.pomoSettle();
+    const [{ id }] = a.store.getState().pomoSessions;
+
+    a.store.setPomoSessionReview(id, 7, '  İyi geçti  ');
+    expect(a.store.getState().pomoSessions[0]).toMatchObject({ rating: 7, note: 'İyi geçti' });
+    await a.store.flush();
+
+    const b = await makeStore(clock, storage); // yeniden açılış — kaydedilmiş mi?
+    expect(b.store.getState().pomoSessions[0]).toMatchObject({ id, rating: 7, note: 'İyi geçti' });
+  });
+
+  it('var olmayan bir seans id\'si için setPomoSessionReview sessizce hiçbir şey yapmaz', async () => {
+    const clock = new FakeClock(2026, 9, 21, 9, 0);
+    const storage = new MemoryStorage();
+    const { store } = await makeStore(clock, storage);
+    expect(() => store.setPomoSessionReview('yok-boyle-bir-id', 5, 'not')).not.toThrow();
+    expect(store.getState().pomoSessions).toHaveLength(0);
+  });
+
+  it('rating null verilerek temizlenebilir', async () => {
+    const clock = new FakeClock(2026, 9, 21, 9, 0);
+    const storage = new MemoryStorage();
+    const { store } = await makeStore(clock, storage);
+    store.pomoStart();
+    clock.advanceMs(25 * MIN);
+    store.pomoSettle();
+    const [{ id }] = store.getState().pomoSessions;
+    store.setPomoSessionReview(id, 8, 'ilk not');
+    store.setPomoSessionReview(id, null, '');
+    expect(store.getState().pomoSessions[0]).toMatchObject({ rating: null, note: '' });
+  });
+
+  it('normalizePomoSession eski (rating/not içermeyen) kayıtlara güvenli varsayılan uygular', () => {
+    const legacy = {
+      id: 'eski',
+      plannedMs: 25 * MIN,
+      startedAt: T0,
+      endedAt: T0 + 25 * MIN,
+      activeMs: 25 * MIN,
+      segments: [{ start: T0, end: T0 + 25 * MIN }],
+      status: 'completed' as const,
+    } as p.PomoSession; // eski şema: rating/note hiç yok
+    expect(p.normalizePomoSession(legacy)).toMatchObject({ rating: null, note: '' });
   });
 });

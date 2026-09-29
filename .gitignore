@@ -5,8 +5,7 @@ shots
 *.log
 .DS_Store
 .claude
-verify-out
-verify-out-*
+verify-out*
 
 # Capacitor iOS — ios/ klasörünün KENDİSİ commit edilir (Capacitor'ın önerdiği
 # desen); yalnızca üretilen/indirilen, tekrar oluşturulabilir dosyalar hariç.

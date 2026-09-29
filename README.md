@@ -61,6 +61,7 @@ gerçek **çalışma aralıkları** (`segments`), bunlardan hesaplanan `activeMs
 - Aynı seans (`runId`) birden fazla kez kaydedilmez — uygulama yeniden açılışında veya yarım kalmış bir yazmadan sonra tekilleştirilir.
 - Gece yarısını geçen bir seansın aktif süresi ilgili günlere **oranla dağıtılır** (`src/core/pomoStats.ts` → `splitByLocalDay`); tamamlanma sayısı ise seansın **bittiği** güne yazılır.
 - Takvim → gün detayı, o günün "N Pomodoro · X saat Y dakika" özetini ve seans saatlerini gösterir.
+- **Seans değerlendirmesi (isteğe bağlı):** bir odak (25 dk) seansı tamamlandığında — yalnızca odaklanma, molalarda değil — küçük bir form açılır: 0-10 arası bir değerlendirme + kısa bir not (`src/ui/PomoReviewSheet.tsx`). Tamamen atlanabilir; "Kaydet"e basılmadan kapatılırsa hiçbir şey yazılmaz. Girilirse `PomoSession.rating`/`note` alanlarında saklanır ve Takvim → gün detayındaki seans listesinde görünür.
 
 ## Günlük (yazılı + sesle giriş)
 
@@ -91,7 +92,7 @@ kalıcı yazma başarısız olursa otomatik geri alınır ve kullanıcıya panel
 - **Tüm günlük bir kayıt kendi günü bitmeden gecikmiş sayılmaz**; saatli bir kayıt saatini geçince gecikmiş sayılır. Tamamlanan kayıtlar hiçbir zaman gecikmiş sayılmaz (`src/core/agenda.ts` → `isOverdue`).
 - Hatırlatmalar: 1 hafta/1 gün/1 saat önce, tam zamanında, özel tarih+saat — çoklu seçilebilir. **Tüm günlük bir kayıtta offset tabanlı hatırlatma eklemek için kullanıcı açıkça bir "hatırlatma saati" seçmek ZORUNDADIR** — hiçbir zaman gizlice gece yarısına düşmez (`reminderTriggerAt`, boş anchor'da `null` döner, hatırlatma planlanmaz). Geçmişte kalacak bir hatırlatma editörde açıkça işaretlenir.
 - Düzenleme/silme, hatırlatma zamanlamasını otomatik günceller (her hatırlatmanın anahtarı kayıt+hatırlatma+tetiklenme anına bağlıdır; bkz. `agendaRemindersBetween`); tamamlanma geri alınırsa gelecekteki hatırlatmalar tekrar geçerli olur.
-- **Bugün ekranı → Yaklaşan:** günlük ilerlemenin altında, en fazla 3 tamamlanmamış kayıt (gecikenler önce), her biri kısa bir aciliyet ifadesiyle ("Bugün 18.00", "Yarın", "3 gün kaldı", "2 gün gecikti"). Kayıt yoksa bölüm hiç render edilmez. "Tümü" → Takvim'i doğrudan Liste görünümünde açar.
+- **Bugün ekranı → Yaklaşan:** günlük ilerlemenin altında, en fazla 3 tamamlanmamış kayıt (gecikenler önce), her biri kısa bir aciliyet ifadesiyle ("Bugün 18:00", "Yarın", "3 gün kaldı", "2 gün gecikti"). Kayıt yoksa bölüm hiç render edilmez. "Tümü" → Takvim'i doğrudan Liste görünümünde açar.
 - **Liste görünümü:** Geciken / Bugün / Yaklaşan / Tamamlanan (varsayılan kapalı) gruplu, tüm ajandayı tarihten bağımsız gösterir.
 - Tekrarlayan etkinlikler ve harici takvim senkronizasyonu bu fazda **yok** (kapsam dışı, bilinçli).
 
@@ -196,6 +197,7 @@ Bu geçiş yalnızca "native sarmalayıcıyı çalışır hale getirmeyi" kapsı
 | Pomodoro varsayılan süreleri | `src/core/types.ts` → `DEFAULT_SETTINGS` |
 | Streak / plan / halka kuralları | `src/core/streak.ts`, `plan.ts`, `progress.ts` |
 | Pomodoro durum makinesi + geçmiş | `src/core/pomodoro.ts`, `pomoStats.ts` |
+| Seans sonrası değerlendirme/not formu | `src/ui/PomoReviewSheet.tsx` |
 | Ajanda mantığı (gecikme, sıralama, hatırlatma) | `src/core/agenda.ts` |
 | Hedef yardımcıları | `src/core/goals.ts` |
 | Dönem/tarih aralığı hesapları | `src/core/periods.ts` |
