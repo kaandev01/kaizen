@@ -38,6 +38,7 @@ function currentSummary(state: ReturnType<typeof useAppState>): BackupSummary {
     agenda: state.agenda.length,
     goals: state.goals.length,
     categories: state.categories.length,
+    categoryBudgets: state.categoryBudgets.length,
   };
 }
 
@@ -50,6 +51,7 @@ const SUMMARY_LABELS: [keyof BackupSummary, string][] = [
   ['agenda', 'ajanda kaydı'],
   ['goals', 'hedef'],
   ['categories', 'kategori'],
+  ['categoryBudgets', 'kategori bütçesi'],
 ];
 
 function download(filename: string, mime: string, text: string) {

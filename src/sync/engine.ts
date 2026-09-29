@@ -10,6 +10,8 @@ import type { Storage } from '../storage/storage';
 import {
   agendaFromRow,
   agendaToRow,
+  categoryBudgetFromRow,
+  categoryBudgetToRow,
   categoryFromRow,
   categoryToRow,
   dayLogFromRow,
@@ -26,6 +28,7 @@ import {
   settingsFromRow,
   settingsToRow,
   type AgendaRow,
+  type CategoryBudgetRow,
   type CategoryRow,
   type DayLogRow,
   type GoalRow,
@@ -216,6 +219,16 @@ export class SyncEngine {
         }
         return;
       }
+      case 'category_budgets': {
+        if (op.op === 'upsert') {
+          const { error } = await supabase.from('category_budgets').upsert(categoryBudgetToRow(this.userId, op.row));
+          if (error) throw error;
+        } else {
+          const { error } = await supabase.from('category_budgets').update({ deleted_at: nowIso() }).eq('category_id', op.id).eq('user_id', this.userId);
+          if (error) throw error;
+        }
+        return;
+      }
       case 'user_settings': {
         const { error } = await supabase.from('user_settings').upsert(settingsToRow(this.userId, op.row));
         if (error) throw error;
@@ -254,6 +267,10 @@ export class SyncEngine {
         this.pullTable<CategoryRow>('categories', (r) => {
           if (r.deleted_at) this.store.applyRemoteCategory(r.id, null);
           else this.store.applyRemoteCategory(r.id, categoryFromRow(r));
+        }),
+        this.pullTable<CategoryBudgetRow>('category_budgets', (r) => {
+          if (r.deleted_at) this.store.applyRemoteCategoryBudget(r.category_id, null);
+          else this.store.applyRemoteCategoryBudget(r.category_id, categoryBudgetFromRow(r));
         }),
         this.pullTable<PomoSessionRow>('pomo_sessions', (r) => this.store.applyRemotePomoSession(pomoSessionFromRow(r) as PomoSession)),
         this.pullSettings(),

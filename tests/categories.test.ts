@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { ancestorIds, categoryPath, categoryStatsForDay, childrenOf, GENERAL_CATEGORY_ID, type Category } from '../src/core/categories';
+import { ancestorIds, categoryPath, categoryStatsForDay, categoryStatsForRange, childrenOf, GENERAL_CATEGORY_ID, type Category } from '../src/core/categories';
+import { weekRange } from '../src/core/periods';
 import type { PomoSession } from '../src/core/pomodoro';
 
 const cat = (id: string, parentId: string | null, name = id): Category => ({ id, parentId, name, color: '#000', order: 0, createdAt: 0 });
@@ -81,5 +82,38 @@ describe('categoryStatsForDay — rollup', () => {
     const farAway = new Date(2020, 0, 1).getTime();
     const stats = categoryStatsForDay([session('net', farAway, 10 * 60_000)], tree, '2026-09-29');
     expect(stats.size).toBe(0);
+  });
+});
+
+describe('categoryStatsForRange — hafta sınırı', () => {
+  it('bir hafta içindeki farklı günlerdeki seanslar toplanır; hafta dışındaki günler hariç tutulur', () => {
+    // 2026-09-29 Salı; o haftanın Pazartesi'si 2026-09-28, Pazar'ı 2026-10-04.
+    const week = weekRange('2026-09-29');
+    expect(week).toEqual({ start: '2026-09-28', end: '2026-10-04' });
+    const mon = new Date(2026, 8, 28, 9, 0).getTime();
+    const sun = new Date(2026, 9, 4, 18, 0).getTime();
+    const prevSun = new Date(2026, 8, 27, 20, 0).getTime(); // önceki hafta, gece yarısını geçmez — dahil edilmemeli
+    const sessions = [session('net', mon, 30 * 60_000), session('net', sun, 20 * 60_000), session('net', prevSun, 30 * 60_000)];
+    const stats = categoryStatsForRange(sessions, tree, week);
+    expect(stats.get('net')).toBe(50 * 60_000); // yalnızca Pazartesi + Pazar, önceki haftanınki hariç
+  });
+
+  it('gece yarısını geçen bir seans doğru günlere (ve dolayısıyla doğru haftaya) dağıtılır', () => {
+    const week = weekRange('2026-09-29');
+    // Pazar 23:50 → Pazartesi 00:10 (bir sonraki haftanın ilk günü) — 20 dk bu haftada, 10 dk gelecek haftada.
+    const crossing = new Date(2026, 9, 4, 23, 50).getTime();
+    const stats = categoryStatsForRange([session('net', crossing, 20 * 60_000)], tree, week);
+    expect(stats.get('net')).toBe(10 * 60_000); // yalnızca bu haftaya (Pazar 23:50-24:00) düşen kısım
+  });
+
+  it('rollup: haritanın değerlerini toplamak çift sayar — genel toplam ayrı hesaplanmalı', () => {
+    const week = weekRange('2026-09-29');
+    const mon = new Date(2026, 8, 28, 9, 0).getTime();
+    const stats = categoryStatsForRange([session('bolum-notlari', mon, 10 * 60_000)], tree, week);
+    // "bolum-notlari" + "atomic-habits" + "kitap" üçü de 10dk taşır — haritanın TÜM değerlerini
+    // toplamak 30dk verir ama gerçek toplam odaklanma süresi yalnızca 10dk'dır.
+    const sumOfMapValues = [...stats.values()].reduce((a, b) => a + b, 0);
+    expect(sumOfMapValues).toBe(30 * 60_000);
+    expect(stats.get('bolum-notlari')).toBe(10 * 60_000);
   });
 });

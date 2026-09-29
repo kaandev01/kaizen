@@ -1,4 +1,4 @@
-import type { Category } from './categories';
+import type { Category, CategoryBudget } from './categories';
 import { migrateLegacyPomoHistory, type PomoSession, type PomoState } from './pomodoro';
 import type { AgendaItem, DayLog, DayRating, Goal, Habit, JournalEntry, Settings } from './types';
 
@@ -17,6 +17,7 @@ export interface Backup {
   agenda: AgendaItem[];
   goals: Goal[];
   categories: Category[];
+  categoryBudgets: CategoryBudget[];
 }
 
 export interface BackupSummary {
@@ -28,6 +29,7 @@ export interface BackupSummary {
   agenda: number;
   goals: number;
   categories: number;
+  categoryBudgets: number;
 }
 
 export type ParseResult = { ok: true; data: Backup; summary: BackupSummary } | { ok: false; error: string };
@@ -45,6 +47,7 @@ function summarize(d: Backup): BackupSummary {
     agenda: d.agenda.length,
     goals: d.goals.length,
     categories: d.categories.length,
+    categoryBudgets: d.categoryBudgets.length,
   };
 }
 
@@ -78,6 +81,11 @@ export function parseBackup(raw: unknown, currentSchemaVersion: number): ParseRe
   // restoreBackup()'unda garanti edilir, burada yalnızca boş dizi olarak kabul edilir.
   if ((r.schemaVersion as number) < 3) {
     if (!Array.isArray(r.categories)) r.categories = [];
+    r.schemaVersion = 3; // ARA sürüm — v3→v4 bloğunun kendi denetimi doğru çalışsın diye currentSchemaVersion'a ATLANMAZ
+  }
+  // v3 → v4: kategori başına haftalık zaman bütçesi bu yedekte hiç yoktu.
+  if ((r.schemaVersion as number) < 4) {
+    if (!Array.isArray(r.categoryBudgets)) r.categoryBudgets = [];
     r.schemaVersion = currentSchemaVersion;
   }
   if (!isArr(r.habits) || !r.habits.every((h) => hasStringId(h) && Array.isArray((h as Habit).revisions))) {
@@ -94,6 +102,7 @@ export function parseBackup(raw: unknown, currentSchemaVersion: number): ParseRe
     ['agenda', 'ajanda'],
     ['goals', 'hedef'],
     ['categories', 'kategori'],
+    ['categoryBudgets', 'kategori bütçesi'],
   ] as const) {
     if (!isArr(r[key])) return { ok: false, error: `Yedek dosyasındaki ${label} verisi bozuk.` };
   }

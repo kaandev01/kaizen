@@ -49,6 +49,26 @@ export function Ring(props: {
   );
 }
 
+/** Yatay ilerleme çubuğu (ör. haftalık hedef). ratio 0..1 — 1'i geçerse %100'de sabit kalır, aşım ayrı bir metinle gösterilir. */
+export function Bar(props: { ratio: number; label: string; valueText: string; class?: string }) {
+  const ratio = Math.min(Math.max(props.ratio, 0), 1);
+  return (
+    <div
+      class={`bar ${props.class ?? ''}`}
+      role="progressbar"
+      aria-label={props.label}
+      aria-valuemin={0}
+      aria-valuemax={100}
+      aria-valuenow={Math.floor(ratio * 100)}
+      aria-valuetext={props.valueText}
+    >
+      <div class="bar-track">
+        <div class="bar-fill" style={{ width: `${ratio * 100}%` } as JSX.CSSProperties} />
+      </div>
+    </div>
+  );
+}
+
 /**
  * Alttan açılan sayfa. Başlık satırı Stitch tasarımındaki gibi:
  * solda vazgeç, ortada başlık, sağda (varsa) ana eylem.
