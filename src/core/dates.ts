@@ -64,10 +64,43 @@ export function formatLongDate(key: DateKey): string {
   return `${dayLong(isoWeekday(key))}, ${d} ${MONTHS[m - 1]}`;
 }
 
-/** Bir zaman damgasını yerel "HH:mm" olarak biçimlendirir (günlük/ajanda saatleri için). */
+/**
+ * Uygulama genelinde ortak kısa tarih biçimi: gün önce, ay sonra —
+ * "23.09" (yıl gerekmiyorsa). Ajanda satırları gibi dar alanlarda kullanılır.
+ */
+export function formatShortDate(key: DateKey): string {
+  const [, m, d] = key.split('-');
+  return `${d}.${m}`;
+}
+
+/** Yıl belirtilmesi gerektiğinde: "23.09.2026". */
+export function formatFullDate(key: DateKey): string {
+  const [y, m, d] = key.split('-');
+  return `${d}.${m}.${y}`;
+}
+
+/** Ana ekranın üst başlığı: "22 Eylül Salı" — virgülsüz, hafta günü sonda. */
+export function formatHomeDate(key: DateKey): string {
+  const [, m, d] = key.split('-').map(Number);
+  return `${d} ${MONTHS[m - 1]} ${dayLong(isoWeekday(key))}`;
+}
+
+/** Hafta günü olmadan gün+ay: "23 Eylül" (ör. Takvim'de seçili gün başlığı). */
+export function formatDayMonth(key: DateKey): string {
+  const [, m, d] = key.split('-').map(Number);
+  return `${d} ${MONTHS[m - 1]}`;
+}
+
+/** Bir zaman damgasını yerel "HH:mm" olarak biçimlendirir (24 saat, günlük/ajanda saatleri için). */
 export function formatClockTime(ms: number): string {
   const d = new Date(ms);
   return `${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
+/** "23.09.2026 18:30" — Intl/yerel ayarlara bağlı kalmadan, ör. yedek dosyası zaman damgaları için. */
+export function formatFullDateTime(ms: number): string {
+  const d = new Date(ms);
+  return `${formatFullDate(toDateKey(d))} ${formatClockTime(ms)}`;
 }
 
 export function greeting(now: Date): string {

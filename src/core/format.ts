@@ -12,3 +12,12 @@ export function formatDuration(ms: number): string {
 export function formatFocusSummary(completedCount: number, activeMs: number): string {
   return `${completedCount} Pomodoro · ${formatDuration(activeMs)}`;
 }
+
+/**
+ * "kez" (genel/sayaç birimi) görsel olarak gösterilmez — "1 kez" yerine
+ * yalın "1" yeterli; "bardak", "sayfa" gibi anlamlı birimler gösterilmeye
+ * devam eder. Yalnızca gösterim kuralı: saklanan `unit` değeri değişmez.
+ */
+export function showUnit(unit: string): boolean {
+  return unit.trim().length > 0 && unit !== 'kez';
+}

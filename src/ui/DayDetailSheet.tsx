@@ -1,10 +1,9 @@
 import { formatClockTime, formatLongDate, type DateKey } from '../core/dates';
-import { formatDuration } from '../core/format';
+import { formatDuration, showUnit } from '../core/format';
 import { habitsForDay } from '../core/progress';
 import { focusStatsForDay, sessionsTouchingDay } from '../core/pomoStats';
 import { Sheet } from './components';
 import { useAppState } from './hooks';
-import { HabitIcon } from './icons';
 import { JournalPanel } from './JournalPanel';
 
 /**
@@ -31,12 +30,10 @@ export function DayDetailSheet({ date, onClose }: { date: DateKey; onClose: () =
             <ul class="mini-habits">
               {dayHabits.map((h) => (
                 <li key={h.habit.id} class={`mini-habit ${h.done ? 'done' : ''}`} style={{ '--c': h.habit.color }}>
-                  <span class="habit-icon sm" aria-hidden="true">
-                    <HabitIcon icon={h.habit.icon} size={16} />
-                  </span>
                   <span class="grow">{h.habit.name}</span>
                   <span class="muted small">
-                    {h.amount}/{h.target} {h.unit}
+                    {h.amount}/{h.target}
+                    {showUnit(h.unit) ? ` ${h.unit}` : ''}
                   </span>
                 </li>
               ))}
