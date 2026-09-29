@@ -1,5 +1,6 @@
 import type { PomoSession } from '../core/pomodoro';
 import type { AgendaItem, DayLog, DayRating, Goal, Habit, JournalEntry } from '../core/types';
+import type { OutboxEntry } from '../sync/types';
 
 export interface Snapshot {
   habits: Habit[];
@@ -27,6 +28,8 @@ export interface Storage {
   putLog(log: DayLog): Promise<void>;
   removeLog(key: string): Promise<void>;
   putMeta(key: string, value: unknown): Promise<void>;
+  /** Tek bir meta değerini okur (ör. senkron pull-cursor'ı) — tüm anlık görüntüyü yüklemeden. */
+  getMeta<T = unknown>(key: string): Promise<T | undefined>;
   putPomoSession(session: PomoSession): Promise<void>;
   putJournalEntry(entry: JournalEntry): Promise<void>;
   removeJournalEntry(id: string): Promise<void>;
@@ -38,6 +41,12 @@ export interface Storage {
   removeGoal(id: string): Promise<void>;
   /** Tüm verinin yerini alır (yedek geri yükleme); tek işlemde, ya hep ya hiç. */
   replaceAll(snapshot: FullSnapshot): Promise<void>;
+
+  // ---- senkron giden kuyruğu (outbox) -------------------------------------
+  /** Oturum açıkken üretilen her değişiklik buraya yazılır (bkz. sync/engine.ts). */
+  putOutboxEntry(entry: OutboxEntry): Promise<void>;
+  removeOutboxEntry(opId: string): Promise<void>;
+  listOutboxEntries(): Promise<OutboxEntry[]>;
 }
 
 export class MemoryStorage implements Storage {
@@ -50,6 +59,7 @@ export class MemoryStorage implements Storage {
   private agenda = new Map<string, AgendaItem>();
   private goals = new Map<string, Goal>();
   private meta = new Map<string, unknown>();
+  private outbox = new Map<string, OutboxEntry>();
 
   async load(): Promise<Snapshot> {
     return {
@@ -78,6 +88,9 @@ export class MemoryStorage implements Storage {
   }
   async putMeta(key: string, value: unknown) {
     this.meta.set(key, structuredClone(value));
+  }
+  async getMeta<T = unknown>(key: string): Promise<T | undefined> {
+    return this.meta.has(key) ? (structuredClone(this.meta.get(key)) as T) : undefined;
   }
   async putPomoSession(s: PomoSession) {
     this.pomoSessions.set(s.id, structuredClone(s));
@@ -116,15 +129,29 @@ export class MemoryStorage implements Storage {
     this.goals = new Map(snap.goals.map((g) => [g.id, structuredClone(g)]));
     this.meta = new Map(Object.entries(structuredClone(snap.meta)));
   }
+
+  async putOutboxEntry(entry: OutboxEntry) {
+    this.outbox.set(entry.opId, structuredClone(entry));
+  }
+  async removeOutboxEntry(opId: string) {
+    this.outbox.delete(opId);
+  }
+  async listOutboxEntries(): Promise<OutboxEntry[]> {
+    return structuredClone([...this.outbox.values()]).sort((a, b) => a.createdAt - b.createdAt);
+  }
 }
 
 /**
  * IndexedDB şema sürümü. v1: habits/logs/meta. v2: pomoSessions/journal/
  * ratings/agenda/goals depoları eklendi (bkz. store.ts'teki SCHEMA_VERSION
- * göçü — eski meta.pomoHistory buraya taşınır).
+ * göçü — eski meta.pomoHistory buraya taşınır). v3: `outbox` deposu eklendi
+ * (bulut senkronu için giden kuyruk) — geriye dönük veri göçü gerekmez, yalnızca
+ * yeni boş bir store eklenir.
  */
-const DB_VERSION = 2;
-const STORES = ['habits', 'logs', 'pomoSessions', 'journal', 'ratings', 'agenda', 'goals', 'meta'] as const;
+const DB_VERSION = 3;
+const STORES = ['habits', 'logs', 'pomoSessions', 'journal', 'ratings', 'agenda', 'goals', 'meta', 'outbox'] as const;
+/** `replaceAll` bu depoları TEMİZLEMEZ — outbox'ı bir yedek geri yükleme silmemeli (bekleyen senkron kaybolmasın). */
+const REPLACE_ALL_STORES = STORES.filter((s) => s !== 'outbox');
 
 const req = <T>(r: IDBRequest<T>) =>
   new Promise<T>((resolve, reject) => {
@@ -159,6 +186,7 @@ export class IndexedDbStorage implements Storage {
         if (!db.objectStoreNames.contains('ratings')) db.createObjectStore('ratings', { keyPath: 'date' });
         if (!db.objectStoreNames.contains('agenda')) db.createObjectStore('agenda', { keyPath: 'id' }).createIndex('date', 'date');
         if (!db.objectStoreNames.contains('goals')) db.createObjectStore('goals', { keyPath: 'id' });
+        if (!db.objectStoreNames.contains('outbox')) db.createObjectStore('outbox', { keyPath: 'opId' });
       };
       open.onsuccess = () => resolve(new IndexedDbStorage(open.result));
       open.onerror = () => reject(open.error);
@@ -224,6 +252,12 @@ export class IndexedDbStorage implements Storage {
     await done(tx);
   }
 
+  async getMeta<T = unknown>(key: string): Promise<T | undefined> {
+    const tx = this.db.transaction('meta', 'readonly');
+    const row = await req(tx.objectStore('meta').get(key) as IDBRequest<{ key: string; value: unknown } | undefined>);
+    return row?.value as T | undefined;
+  }
+
   async putPomoSession(s: PomoSession) {
     const tx = this.db.transaction('pomoSessions', 'readwrite');
     tx.objectStore('pomoSessions').put(s);
@@ -274,9 +308,25 @@ export class IndexedDbStorage implements Storage {
     await done(tx);
   }
 
+  async putOutboxEntry(entry: OutboxEntry) {
+    const tx = this.db.transaction('outbox', 'readwrite');
+    tx.objectStore('outbox').put(entry);
+    await done(tx);
+  }
+  async removeOutboxEntry(opId: string) {
+    const tx = this.db.transaction('outbox', 'readwrite');
+    tx.objectStore('outbox').delete(opId);
+    await done(tx);
+  }
+  async listOutboxEntries(): Promise<OutboxEntry[]> {
+    const tx = this.db.transaction('outbox', 'readonly');
+    const entries = await req(tx.objectStore('outbox').getAll() as IDBRequest<OutboxEntry[]>);
+    return entries.sort((a, b) => a.createdAt - b.createdAt);
+  }
+
   async replaceAll(snap: FullSnapshot) {
-    const tx = this.db.transaction(STORES, 'readwrite');
-    for (const name of STORES) tx.objectStore(name).clear();
+    const tx = this.db.transaction(REPLACE_ALL_STORES, 'readwrite');
+    for (const name of REPLACE_ALL_STORES) tx.objectStore(name).clear();
     for (const h of snap.habits) tx.objectStore('habits').put(h);
     for (const l of snap.logs) tx.objectStore('logs').put(l);
     for (const s of snap.pomoSessions) tx.objectStore('pomoSessions').put(s);
@@ -289,10 +339,15 @@ export class IndexedDbStorage implements Storage {
   }
 }
 
-/** IndexedDB açılamazsa (ör. bazı gizli modlar) bellek deposuna düşer. */
-export async function openBestStorage(): Promise<{ storage: Storage; fallbackReason: string | null }> {
+/**
+ * IndexedDB açılamazsa (ör. bazı gizli modlar) bellek deposuna düşer.
+ * `name` verilirse o veritabanı açılır — giriş yapmış her kullanıcı kendi
+ * `kaizen-${userId}` veritabanında saklanır ki çıkış/hesap değişiminde bir
+ * kullanıcının yerel verisi diğerine hiç görünmesin (bkz. main.tsx).
+ */
+export async function openBestStorage(name?: string): Promise<{ storage: Storage; fallbackReason: string | null }> {
   try {
-    const storage = await IndexedDbStorage.open();
+    const storage = await IndexedDbStorage.open(name);
     return { storage, fallbackReason: null };
   } catch (e) {
     return {

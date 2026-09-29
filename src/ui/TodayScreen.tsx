@@ -1,7 +1,8 @@
 import type { JSX } from 'preact';
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
-import { addDays, dayLong, formatLongDate, isoWeekday, type DateKey } from '../core/dates';
+import { addDays, dayLong, formatHomeDate, isoWeekday, type DateKey } from '../core/dates';
 import { homeUpcoming } from '../core/agenda';
+import { showUnit } from '../core/format';
 import { planFor } from '../core/plan';
 import { amountOf, habitsForDay, summarize, type HabitDay } from '../core/progress';
 import { currentStreak } from '../core/streak';
@@ -72,7 +73,7 @@ export function TodayScreen() {
       void cancelHabitNotifications(row.habit.id); // bugünün kalan hatırlatmaları
     } else if (clamped > prev) haptic('tap', haptics);
 
-    const entry: UndoToast = { habitId: row.habit.id, date: today, prev, text: `${row.habit.name}: ${clamped}/${row.target} ${row.unit}` };
+    const entry: UndoToast = { habitId: row.habit.id, date: today, prev, text: `${row.habit.name}: ${clamped}/${row.target}${showUnit(row.unit) ? ` ${row.unit}` : ''}` };
     history.current = [...history.current.slice(-19), entry];
     showToast(entry);
   };
@@ -94,8 +95,8 @@ export function TodayScreen() {
     <section aria-labelledby="today-h">
       <header class="screen-head">
         <div>
-          <p class="eyebrow">{formatLongDate(today)}</p>
-          <h1 id="today-h">Bugün</h1>
+          <p class="eyebrow">{formatHomeDate(today)}</p>
+          <h1 id="today-h">Kaizen</h1>
         </div>
         <div class="row gap">
           <button class="round-btn" aria-label="Ayarlar" onClick={goToSettings}>
@@ -136,12 +137,6 @@ export function TodayScreen() {
             >
               {allDone ? <Icon name="check" size={56} /> : <span class="ring-pct">{pct}%</span>}
             </Ring>
-            <p class="hero-count">
-              <b>
-                {summary.completed}/{summary.planned}
-              </b>{' '}
-              alışkanlık tamamlandı
-            </p>
             {allDone && <p class="success-text">Bugünün tüm hedefleri tamam. Harika iş!</p>}
           </div>
 
@@ -232,21 +227,19 @@ function HabitRow(props: { row: HabitDay; today: DateKey; celebrating: boolean; 
   return (
     <li class={`habit ${row.done ? 'done' : ''} ${props.celebrating ? 'celebrate' : ''}`} style={{ '--c': row.habit.color } as JSX.CSSProperties}>
       <button class="habit-main" onClick={props.onOpen} aria-label={`${row.habit.name}, ${row.amount}/${row.target} ${row.unit}, ${streak} gün serisi${row.done ? ', tamamlandı' : ''}. Miktarı düzenle`}>
-        <span class="habit-icon" aria-hidden="true">
-          <HabitIcon icon={row.habit.icon} size={22} />
-        </span>
         <span class="habit-name">
           <span class="name-text">{row.habit.name}</span>
-          <span class={`streak ${streak === 0 ? 'zero' : ''}`} aria-hidden="true">
-            <Icon name="flame" size={14} />
-            {streak}
-          </span>
+          {streak > 0 && (
+            <span class="streak" aria-hidden="true">
+              {streak} gün
+            </span>
+          )}
         </span>
         <span class="habit-count" aria-hidden="true">
           <b>
             {row.amount}/{row.target}
           </b>
-          <small>{row.unit}</small>
+          {showUnit(row.unit) && <small>{row.unit}</small>}
         </span>
       </button>
       {row.done ? (
@@ -293,7 +286,8 @@ function AmountSheet(props: { row: HabitDay; onClose: () => void; onChange: (n: 
           </button>
         </div>
         <p class="center-text muted">
-          Hedef: {row.target} {row.unit}
+          Hedef: {row.target}
+          {showUnit(row.unit) ? ` ${row.unit}` : ''}
           {row.amount > row.target ? ` · ${row.amount - row.target} fazla` : ''}
         </p>
         <div class="row gap">

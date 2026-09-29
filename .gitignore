@@ -5,4 +5,7 @@ shots
 *.log
 .DS_Store
 .claude
-verify-out
+verify-out*
+.env
+.env.local
+.env.*.local

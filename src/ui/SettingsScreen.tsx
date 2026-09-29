@@ -1,6 +1,8 @@
 import type { JSX } from 'preact';
 import { useRef, useState } from 'preact/hooks';
 import { parseBackup, type Backup, type BackupSummary } from '../core/backup';
+import { formatFullDateTime } from '../core/dates';
+import { showUnit } from '../core/format';
 import { buildIcs } from '../core/ics';
 import { currentRevision } from '../core/plan';
 import { upcomingReminders } from '../core/reminders';
@@ -9,9 +11,20 @@ import { ConfirmDialog, Icon, Segmented, Sheet, Switch } from './components';
 import { Durations } from './Durations';
 import { HabitEditor, PermissionNote, scheduleSummary } from './HabitEditor';
 import { useAppState, useStore } from './hooks';
-import { HabitIcon } from './icons';
 import { SCHEMA_VERSION } from '../storage/store';
 import { haptic, isIOS, isStandalone, notificationState, requestNotificationPermission, type PermState } from './platform';
+import { useSessionUser } from './session';
+import { supabase } from '../sync/supabaseClient';
+import type { SyncStatus } from '../sync/types';
+import { useSyncStatus } from './syncStatus';
+
+const SYNC_STATUS_LABEL: Record<SyncStatus, string> = {
+  idle: 'Güncel',
+  pending: 'Bekliyor',
+  syncing: 'Gönderiliyor…',
+  error: 'Gönderilemedi, tekrar denenecek',
+  offline: 'Çevrimdışı',
+};
 
 const VERSION = '0.2.0';
 
@@ -53,6 +66,9 @@ export function SettingsScreen() {
   const store = useStore();
   const state = useAppState();
   const { settings } = state;
+  const user = useSessionUser();
+  const syncStatus = useSyncStatus();
+  const [signingOut, setSigningOut] = useState(false);
   const [perm, setPerm] = useState<PermState>(notificationState());
   const [editId, setEditId] = useState<string | null>(null);
   const [durationsOpen, setDurationsOpen] = useState(false);
@@ -110,6 +126,36 @@ export function SettingsScreen() {
         <div class="notice warn" role="alert">
           Bu tarayıcıda kalıcı depolama açılamadı; veriler uygulama kapanınca silinir. Özel gezinme modunu kapat.
         </div>
+      )}
+
+      {user && (
+        <>
+          <h2 class="group-title">Hesap</h2>
+          <div class="group">
+            <div class="setting">
+              <span class="grow">{user.email ?? 'Giriş yapıldı'}</span>
+            </div>
+            <div class="setting">
+              <span class="grow">
+                Senkronizasyon
+                <span class="muted small block">{SYNC_STATUS_LABEL[syncStatus]}</span>
+              </span>
+            </div>
+            <button
+              class="setting link"
+              disabled={signingOut}
+              onClick={async () => {
+                if (signingOut) return;
+                setSigningOut(true);
+                await supabase?.auth.signOut();
+                // Başarılıysa Root.tsx onAuthStateChange ile giriş ekranına döner; bu bileşen
+                // o sırada zaten unmount olacağı için setSigningOut(false) burada gerekmiyor.
+              }}
+            >
+              <span class="grow">{signingOut ? 'Çıkış yapılıyor…' : 'Çıkış Yap'}</span>
+            </button>
+          </div>
+        </>
       )}
 
       <h2 class="group-title">Görünüm</h2>
@@ -207,13 +253,11 @@ export function SettingsScreen() {
           const rev = currentRevision(h);
           return (
             <button key={h.id} class="setting link" onClick={() => setEditId(h.id)} style={{ '--c': h.color } as JSX.CSSProperties}>
-              <span class="habit-icon sm" aria-hidden="true">
-                <HabitIcon icon={h.icon} size={18} />
-              </span>
               <span class="grow">
                 <span class="strong-text">{h.name}</span>
                 <span class="muted small block">
-                  {rev.target} {rev.unit} · {scheduleSummary(rev.schedule)}
+                  {rev.target}
+                  {showUnit(rev.unit) ? ` ${rev.unit}` : ''} · {scheduleSummary(rev.schedule)}
                   {h.reminders.length ? ` · ${h.reminders.length} hatırlatma` : ''}
                 </span>
               </span>
@@ -288,7 +332,7 @@ export function SettingsScreen() {
                   ))}
                 </tbody>
               </table>
-              <p class="muted small">Yedek tarihi: {new Date(pendingRestore.data.exportedAt).toLocaleString('tr-TR')}</p>
+              <p class="muted small">Yedek tarihi: {formatFullDateTime(new Date(pendingRestore.data.exportedAt).getTime())}</p>
             </>
           }
           confirmLabel="Geri Yükle"
