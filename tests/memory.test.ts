@@ -78,6 +78,8 @@ describe('snapshotForRange', () => {
       activeMs: 25 * 60_000,
       segments: [{ start: new Date(2026, 8, 30, 23, 50).getTime(), end: new Date(2026, 9, 1, 0, 15).getTime() }],
       status: 'completed' as const,
+      rating: null,
+      note: '',
     };
     const src = { habits: [], logs: [], pomoSessions: [spanning], journal: [], ratings: [], agenda: [], goals: [] };
     expect(snapshotForRange(src, range).pomoSessions).toEqual([spanning]);

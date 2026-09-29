@@ -196,6 +196,7 @@ export class Store {
     }
 
     const pomodoro = normalizePomoState(pomodoroMeta, pomo.initialPomo(settings.pomodoro));
+    pomoSessions = pomoSessions.map(pomo.normalizePomoSession); // eski kayıtlarda rating/note olmayabilir
     const journal = snap.journal.filter(validJournalEntry);
     const ratings: Record<DateKey, DayRating> = {};
     for (const r of snap.ratings.filter(validRating)) ratings[r.date] = r;
@@ -331,6 +332,19 @@ export class Store {
   }
   pomoDismissCompletion() {
     this.applyPomo(pomo.dismissCompletion(this.state.pomodoro), null);
+  }
+
+  /**
+   * Tamamlanmış bir Pomodoro seansına sonradan değerlendirme (0-10, isteğe
+   * bağlı) ve/veya not ekler/günceller. Kayıt bulunamazsa sessizce hiçbir
+   * şey yapmaz (seans bir şekilde silinmiş/erişilemez olabilir).
+   */
+  setPomoSessionReview(id: string, rating: number | null, note: string): void {
+    const existing = this.state.pomoSessions.find((s) => s.id === id);
+    if (!existing) return;
+    const session: pomo.PomoSession = { ...existing, rating, note: note.trim() };
+    this.set({ pomoSessions: this.state.pomoSessions.map((s) => (s.id === id ? session : s)) });
+    this.persist(() => this.storage.putPomoSession(session));
   }
 
   // ---- günlük (journal) ------------------------------------------------------
@@ -521,7 +535,7 @@ export class Store {
     const goals = data.goals.filter(validGoal);
     const settings = mergeSettings(data.settings);
     const pomodoro = pomo.initialPomo(settings.pomodoro);
-    const pomoSessions = data.pomoSessions;
+    const pomoSessions = data.pomoSessions.map(pomo.normalizePomoSession); // eski yedeklerde rating/note olmayabilir
 
     await this.flush(); // bekleyen eski yazmalar bitsin, sonra hepsini tek işlemde değiştir
     const snapshot: FullSnapshot = {

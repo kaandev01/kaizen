@@ -60,6 +60,10 @@ export interface PomoSession {
   activeMs: number;
   segments: PomoSegment[];
   status: PomoSessionStatus;
+  /** Seans sonrası isteğe bağlı öz-değerlendirme, 0-10 (girilmemişse null). */
+  rating: number | null;
+  /** İsteğe bağlı, seansla ilgili kısa not; girilmemişse boş dize. */
+  note: string;
 }
 
 export interface PomoResult {
@@ -140,6 +144,8 @@ function abandonFocus(s: PomoState, now: number): PomoSession | null {
     activeMs,
     segments,
     status: 'stopped',
+    rating: null,
+    note: '',
   };
 }
 
@@ -220,6 +226,8 @@ export function settle(s: PomoState, cfg: PomodoroConfig, now: number): PomoResu
       activeMs: sumSegmentsMs(segments),
       segments,
       status: 'completed',
+      rating: null,
+      note: '',
     };
     cycleCount += 1;
     next = cycleCount % cfg.longEvery === 0 ? 'long' : 'short';
@@ -236,6 +244,15 @@ export function settle(s: PomoState, cfg: PomodoroConfig, now: number): PomoResu
 
 export const dismissCompletion = (s: PomoState): PomoState => (s.lastCompleted ? { ...s, lastCompleted: null } : s);
 
+/** `rating`/`note` şemaya sonradan eklendi — eski kayıtlarda yoktur; güvenli varsayılanlar uygulanır. */
+export function normalizePomoSession(raw: PomoSession): PomoSession {
+  return {
+    ...raw,
+    rating: typeof raw.rating === 'number' ? raw.rating : null,
+    note: typeof raw.note === 'string' ? raw.note : '',
+  };
+}
+
 /**
  * Şema v1'deki eski `pomoHistory` kayıtlarını (yalnızca id/at/ms) yeni
  * `PomoSession` biçimine çevirir. Hem canlı veritabanı göçünde (store.ts)
@@ -248,7 +265,7 @@ export function migrateLegacyPomoHistory(raw: unknown): PomoSession[] {
     if (!r || typeof r !== 'object') continue;
     const { id, at, ms } = r as { id?: unknown; at?: unknown; ms?: unknown };
     if (typeof id !== 'string' || typeof at !== 'number' || typeof ms !== 'number' || ms <= 0) continue;
-    out.push({ id, plannedMs: ms, startedAt: at - ms, endedAt: at, activeMs: ms, segments: [{ start: at - ms, end: at }], status: 'completed' });
+    out.push({ id, plannedMs: ms, startedAt: at - ms, endedAt: at, activeMs: ms, segments: [{ start: at - ms, end: at }], status: 'completed', rating: null, note: '' });
   }
   return out;
 }

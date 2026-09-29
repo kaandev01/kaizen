@@ -1233,6 +1233,10 @@ button:disabled {
   grid-template-columns: repeat(5, 1fr);
   gap: 8px;
 }
+/* 0-10 (11 değer) için: 5'li ızgarada tek başına kalan son satırı önlemek üzere 6'lı — 6+5, dengeli iki satır. */
+.rating-row.of11 {
+  grid-template-columns: repeat(6, 1fr);
+}
 .rating-dot {
   min-height: 44px;
   border-radius: 12px;
@@ -1428,12 +1432,23 @@ button:disabled {
 }
 .mini-session {
   display: flex;
-  align-items: center;
-  justify-content: space-between;
+  flex-direction: column;
+  gap: 4px;
   padding: 8px 10px;
   border-radius: var(--radius-sm);
   background: var(--surface-2);
   font-size: 0.9rem;
+}
+/* Zaman + rozet satırı; isteğe bağlı not varsa altına düz metin olarak eklenir. */
+.mini-session-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.mini-session-note {
+  color: var(--muted);
+  font-size: 0.82rem;
+  white-space: pre-wrap;
 }
 .focus-summary {
   margin: 0 0 8px;
