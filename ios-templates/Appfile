@@ -1,0 +1,3 @@
+# `ios/fastlane/Appfile` olarak kopyalanır (bkz. bu klasördeki README.md).
+app_identifier(ENV["APP_IDENTIFIER"] || "com.kaandev.kaizen")
+team_id(ENV["APPLE_TEAM_ID"])
