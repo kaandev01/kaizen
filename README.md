@@ -57,6 +57,7 @@ gerçek **çalışma aralıkları** (`segments`), bunlardan hesaplanan `activeMs
 - Aynı seans (`runId`) birden fazla kez kaydedilmez — uygulama yeniden açılışında veya yarım kalmış bir yazmadan sonra tekilleştirilir.
 - Gece yarısını geçen bir seansın aktif süresi ilgili günlere **oranla dağıtılır** (`src/core/pomoStats.ts` → `splitByLocalDay`); tamamlanma sayısı ise seansın **bittiği** güne yazılır.
 - Takvim → gün detayı, o günün "N Pomodoro · X saat Y dakika" özetini ve seans saatlerini gösterir.
+- **Seans değerlendirmesi (isteğe bağlı):** bir odak (25 dk) seansı tamamlandığında — yalnızca odaklanma, molalarda değil — küçük bir form açılır: 0-10 arası bir değerlendirme + kısa bir not (`src/ui/PomoReviewSheet.tsx`). Tamamen atlanabilir; "Kaydet"e basılmadan kapatılırsa hiçbir şey yazılmaz. Girilirse `PomoSession.rating`/`note` alanlarında saklanır ve Takvim → gün detayındaki seans listesinde görünür.
 
 ## Günlük (yazılı + sesle giriş)
 
@@ -159,6 +160,7 @@ katmanının üzerine kolayca inşa edilebileceği, test edilmiş bir sorgu katm
 | Pomodoro varsayılan süreleri | `src/core/types.ts` → `DEFAULT_SETTINGS` |
 | Streak / plan / halka kuralları | `src/core/streak.ts`, `plan.ts`, `progress.ts` |
 | Pomodoro durum makinesi + geçmiş | `src/core/pomodoro.ts`, `pomoStats.ts` |
+| Seans sonrası değerlendirme/not formu | `src/ui/PomoReviewSheet.tsx` |
 | Ajanda mantığı (gecikme, sıralama, hatırlatma) | `src/core/agenda.ts` |
 | Hedef yardımcıları | `src/core/goals.ts` |
 | Dönem/tarih aralığı hesapları | `src/core/periods.ts` |

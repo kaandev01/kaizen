@@ -53,10 +53,14 @@ export function DayDetailSheet({ date, onClose }: { date: DateKey; onClose: () =
               <ul class="mini-sessions">
                 {daySessions.map((s) => (
                   <li key={s.id} class="mini-session">
-                    <span>
-                      {formatClockTime(s.startedAt)}–{formatClockTime(s.endedAt)}
-                    </span>
-                    <span class={`badge ${s.status === 'completed' ? 'granted' : ''}`}>{s.status === 'completed' ? 'Tamamlandı' : 'Erken bitirildi'}</span>
+                    <div class="mini-session-row">
+                      <span>
+                        {formatClockTime(s.startedAt)}–{formatClockTime(s.endedAt)}
+                        {s.rating !== null && <span class="muted small"> · {s.rating}/10</span>}
+                      </span>
+                      <span class={`badge ${s.status === 'completed' ? 'granted' : ''}`}>{s.status === 'completed' ? 'Tamamlandı' : 'Erken bitirildi'}</span>
+                    </div>
+                    {s.note && <p class="mini-session-note">{s.note}</p>}
                   </li>
                 ))}
               </ul>

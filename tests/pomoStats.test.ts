@@ -30,7 +30,7 @@ describe('splitByLocalDay: gece yarısını geçen aralığın dağıtımı', ()
 });
 
 function session(over: Partial<PomoSession>): PomoSession {
-  return { id: 'x', plannedMs: 25 * 60_000, startedAt: 0, endedAt: 0, activeMs: 0, segments: [], status: 'completed', ...over };
+  return { id: 'x', plannedMs: 25 * 60_000, startedAt: 0, endedAt: 0, activeMs: 0, segments: [], status: 'completed', rating: null, note: '', ...over };
 }
 
 describe('focusStatsForDay / sessionsTouchingDay', () => {
