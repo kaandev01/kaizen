@@ -37,6 +37,12 @@ export function Root() {
   const migrationCtx = useRef<{ userId: string; storage: Storage } | null>(null);
   const migratingRef = useRef(false);
   const engineRef = useRef<SyncEngine | null>(null);
+  // `undefined` = henüz hiç ayarlanmadı (ilk açılış); `null` = oturum yok (çıkış yapılmış).
+  // Supabase `onAuthStateChange`'i TOKEN_REFRESHED gibi kullanıcı DEĞİŞMEYEN olaylarda da
+  // tetikler — bunlarda Store/SyncEngine'i sıfırdan kurup senkron durumunu "offline"a
+  // sıfırlamamak için gerçek bir kullanıcı geçişi (giriş/çıkış/hesap değişimi) olup
+  // olmadığı burada karşılaştırılır.
+  const activeUserId = useRef<string | null | undefined>(undefined);
 
   useEffect(() => {
     if (!supabase) {
@@ -76,6 +82,8 @@ export function Root() {
 
     const applySession = (uid: string | null, email: string | null) => {
       setSessionUser(uid ? { id: uid, email } : null);
+      if (activeUserId.current === uid) return Promise.resolve(); // aynı kullanıcı/durum — yeniden kurmaya gerek yok
+      activeUserId.current = uid;
       return openForUser(uid)
         .then(() => {
           if (!cancelled) setPhase(uid ? 'authed' : 'unauthed');
