@@ -152,8 +152,10 @@ export class SyncEngine {
         return;
       }
       case 'pomo_sessions': {
-        // Değişmez kayıt: id çakışırsa hiçbir şey yapma (aynı seans iki kez kaydedilmez).
-        const { error } = await supabase.from('pomo_sessions').upsert(pomoSessionToRow(this.userId, op.row), { ignoreDuplicates: true });
+        // Süre/segment/durum değişmezdir ama rating/note sonradan eklenebilir
+        // (bkz. Store.setPomoSessionReview) — bu yüzden düz upsert (id çakışırsa
+        // güncellenir), "ignoreDuplicates" DEĞİL.
+        const { error } = await supabase.from('pomo_sessions').upsert(pomoSessionToRow(this.userId, op.row));
         if (error) throw error;
         return;
       }

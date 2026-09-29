@@ -43,18 +43,16 @@ export function urgencyOf(item: AgendaItem, now: Date): Urgency {
   return daysBetween(today, item.date) <= 3 ? 'soon' : 'later';
 }
 
-const dot = (hhmm: string) => hhmm.replace(':', '.');
-
-/** "Bugün 18.00", "Yarın", "3 gün kaldı", "2 gün gecikti" gibi kısa bir ifade. */
+/** "Bugün 18:30", "Yarın", "3 gün kaldı", "2 gün gecikti" gibi kısa bir ifade. Saatler her zaman 24 saat, "HH:mm". */
 export function formatUrgencyPhrase(item: AgendaItem, now: Date): string {
   const today = toDateKey(now);
   if (isOverdue(item, now)) {
     if (item.date === today) return 'Bugün geçti';
     return `${daysBetween(item.date, today)} gün gecikti`;
   }
-  if (item.date === today) return item.time ? `Bugün ${dot(item.time)}` : 'Bugün';
+  if (item.date === today) return item.time ? `Bugün ${item.time}` : 'Bugün';
   const days = daysBetween(today, item.date);
-  if (days === 1) return item.time ? `Yarın ${dot(item.time)}` : 'Yarın';
+  if (days === 1) return item.time ? `Yarın ${item.time}` : 'Yarın';
   return `${days} gün kaldı`;
 }
 

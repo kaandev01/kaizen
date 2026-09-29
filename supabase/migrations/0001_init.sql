@@ -141,9 +141,10 @@ end;
 $$;
 
 -- =========================================================================
--- pomo_sessions — Tamamlanmış/durdurulmuş Pomodoro seansları (değişmez kayıt;
--- id zaten istemcide runId olarak üretiliyor, id çakışırsa hiçbir şey yapılmaz —
--- aynı seans iki kez kaydedilmez). Yalnızca ekleme/okuma; güncelleme/silme yok.
+-- pomo_sessions — Tamamlanmış/durdurulmuş Pomodoro seansları. Süre/segment/
+-- durum alanları değişmezdir (id zaten istemcide runId olarak üretiliyor,
+-- aynı seans iki kez kaydedilmez) — ama `rating`/`note` seans bittikten
+-- SONRA eklenebilir (bkz. Store.setPomoSessionReview), bu yüzden update de var.
 -- =========================================================================
 create table if not exists pomo_sessions (
   id uuid primary key,
@@ -154,13 +155,16 @@ create table if not exists pomo_sessions (
   active_ms bigint not null,
   segments jsonb not null default '[]'::jsonb,
   status text not null,
+  rating integer,
+  note text not null default '',
   server_updated_at timestamptz not null default now()
 );
 alter table pomo_sessions enable row level security;
 create policy "pomo_sessions_select_own" on pomo_sessions for select using (auth.uid() = user_id);
 create policy "pomo_sessions_insert_own" on pomo_sessions for insert with check (auth.uid() = user_id);
+create policy "pomo_sessions_update_own" on pomo_sessions for update using (auth.uid() = user_id) with check (auth.uid() = user_id);
 create index if not exists pomo_sessions_user_sync_idx on pomo_sessions (user_id, server_updated_at);
-create trigger trg_pomo_sessions_touch before insert on pomo_sessions
+create trigger trg_pomo_sessions_touch before insert or update on pomo_sessions
   for each row execute function kaizen_touch_updated_at();
 
 -- =========================================================================

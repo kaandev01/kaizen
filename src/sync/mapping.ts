@@ -96,6 +96,8 @@ export function pomoSessionToRow(userId: string, s: PomoSession) {
     active_ms: s.activeMs,
     segments: s.segments,
     status: s.status,
+    rating: s.rating,
+    note: s.note,
   };
 }
 
@@ -244,6 +246,8 @@ export interface PomoSessionRow {
   active_ms: number;
   segments: PomoSession['segments'];
   status: string;
+  rating: number | null;
+  note: string | null;
   server_updated_at: string;
 }
 export const pomoSessionFromRow = (r: PomoSessionRow): PomoSession => ({
@@ -254,4 +258,6 @@ export const pomoSessionFromRow = (r: PomoSessionRow): PomoSession => ({
   activeMs: r.active_ms,
   segments: r.segments,
   status: r.status === 'stopped' ? 'stopped' : 'completed',
+  rating: typeof r.rating === 'number' ? r.rating : null,
+  note: r.note ?? '',
 });

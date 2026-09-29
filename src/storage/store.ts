@@ -217,6 +217,7 @@ export class Store {
     }
 
     const pomodoro = normalizePomoState(pomodoroMeta, pomo.initialPomo(settings.pomodoro));
+    pomoSessions = pomoSessions.map(pomo.normalizePomoSession); // eski kayıtlarda rating/note olmayabilir
     const journal = snap.journal.filter(validJournalEntry);
     const ratings: Record<DateKey, DayRating> = {};
     for (const r of snap.ratings.filter(validRating)) ratings[r.date] = r;
@@ -366,6 +367,19 @@ export class Store {
   }
   pomoDismissCompletion() {
     this.applyPomo(pomo.dismissCompletion(this.state.pomodoro), null);
+  }
+
+  /**
+   * Tamamlanmış bir Pomodoro seansına sonradan değerlendirme (0-10, isteğe
+   * bağlı) ve/veya not ekler/günceller. Kayıt bulunamazsa sessizce hiçbir
+   * şey yapmaz (seans bir şekilde silinmiş/erişilemez olabilir).
+   */
+  setPomoSessionReview(id: string, rating: number | null, note: string): void {
+    const existing = this.state.pomoSessions.find((s) => s.id === id);
+    if (!existing) return;
+    const session: pomo.PomoSession = { ...existing, rating, note: note.trim() };
+    this.set({ pomoSessions: this.state.pomoSessions.map((s) => (s.id === id ? session : s)) });
+    this.persist(() => this.storage.putPomoSession(session), { table: 'pomo_sessions', op: 'upsert', row: session });
   }
 
   // ---- günlük (journal) ------------------------------------------------------
@@ -606,10 +620,15 @@ export class Store {
     this.persist(() => this.storage.putMeta('pomodoro', pomodoro));
   }
 
-  /** Tamamlanmış Pomodoro seansları değişmezdir — yalnızca yerelde yoksa eklenir. */
+  /**
+   * Tamamlanmış bir Pomodoro seansının temel alanları (süre/segment/durum)
+   * değişmezdir, ama `rating`/`note` sonradan eklenebilir (bkz.
+   * `setPomoSessionReview`) — bu yüzden yerelde zaten varsa üzerine yazılır
+   * (başka bir cihazdan gelen değerlendirme burada da görünsün diye).
+   */
   applyRemotePomoSession(session: pomo.PomoSession): void {
-    if (this.state.pomoSessions.some((s) => s.id === session.id)) return;
-    this.set({ pomoSessions: [...this.state.pomoSessions, session] });
+    const exists = this.state.pomoSessions.some((s) => s.id === session.id);
+    this.set({ pomoSessions: exists ? this.state.pomoSessions.map((s) => (s.id === session.id ? session : s)) : [...this.state.pomoSessions, session] });
     this.persist(() => this.storage.putPomoSession(session));
   }
 
@@ -649,7 +668,7 @@ export class Store {
     const goals = data.goals.filter(validGoal);
     const settings = mergeSettings(data.settings);
     const pomodoro = pomo.initialPomo(settings.pomodoro);
-    const pomoSessions = data.pomoSessions;
+    const pomoSessions = data.pomoSessions.map(pomo.normalizePomoSession); // eski yedeklerde rating/note olmayabilir
 
     await this.flush(); // bekleyen eski yazmalar bitsin, sonra hepsini tek işlemde değiştir
     // Senkron için: değiştirmeden ÖNCEKİ durumu sakla — geri yükleme de (oturum açıksa)

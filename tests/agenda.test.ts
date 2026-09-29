@@ -88,7 +88,7 @@ describe('urgencyOf — importance ile karıştırılmaz', () => {
 describe('formatUrgencyPhrase', () => {
   it('örnek ifadeler', () => {
     const now = new Date(2026, 8, 21, 9, 0);
-    expect(formatUrgencyPhrase(item({ date: '2026-09-21', time: '18:00' }), now)).toBe('Bugün 18.00');
+    expect(formatUrgencyPhrase(item({ date: '2026-09-21', time: '18:00' }), now)).toBe('Bugün 18:00'); // 24 saat, iki nokta üst üste
     expect(formatUrgencyPhrase(item({ date: '2026-09-22' }), now)).toBe('Yarın');
     expect(formatUrgencyPhrase(item({ date: '2026-09-24' }), now)).toBe('3 gün kaldı');
     expect(formatUrgencyPhrase(item({ date: '2026-09-19' }), now)).toBe('2 gün gecikti');
