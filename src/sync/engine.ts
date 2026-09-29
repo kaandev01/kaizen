@@ -10,6 +10,8 @@ import type { Storage } from '../storage/storage';
 import {
   agendaFromRow,
   agendaToRow,
+  categoryFromRow,
+  categoryToRow,
   dayLogFromRow,
   goalFromRow,
   goalToRow,
@@ -24,6 +26,7 @@ import {
   settingsFromRow,
   settingsToRow,
   type AgendaRow,
+  type CategoryRow,
   type DayLogRow,
   type GoalRow,
   type HabitRow,
@@ -48,10 +51,6 @@ export class SyncEngine {
   private pulling = false;
   private timer?: ReturnType<typeof setInterval>;
   private attached = false;
-  // `undefined` (henüz hiç bildirilmedi) BİLEREK gerçek bir SyncStatus değeri DEĞİL:
-  // aksi hâlde ilk gerçek durum (ör. boş kuyrukta 'idle') iç varsayılanla aynı çıkarsa
-  // `setStatus` "değişmedi" sanıp hiç bildirmez — arayüz kendi başlangıç değerinde
-  // (syncStatus.ts'teki 'offline') sonsuza dek takılı kalır. Gerçek bir hata yokken bile.
   // `undefined` (henüz hiç bildirilmedi) BİLEREK gerçek bir SyncStatus değeri DEĞİL:
   // aksi hâlde ilk gerçek durum (ör. boş kuyrukta 'idle') iç varsayılanla aynı çıkarsa
   // `setStatus` "değişmedi" sanıp hiç bildirmez — arayüz kendi başlangıç değerinde
@@ -207,6 +206,16 @@ export class SyncEngine {
         }
         return;
       }
+      case 'categories': {
+        if (op.op === 'upsert') {
+          const { error } = await supabase.from('categories').upsert(categoryToRow(this.userId, op.row));
+          if (error) throw error;
+        } else {
+          const { error } = await supabase.from('categories').update({ deleted_at: nowIso() }).eq('id', op.id).eq('user_id', this.userId);
+          if (error) throw error;
+        }
+        return;
+      }
       case 'user_settings': {
         const { error } = await supabase.from('user_settings').upsert(settingsToRow(this.userId, op.row));
         if (error) throw error;
@@ -241,6 +250,10 @@ export class SyncEngine {
         this.pullTable<GoalRow>('goals', (r) => {
           if (r.deleted_at) this.store.applyRemoteGoal(r.id, null);
           else this.store.applyRemoteGoal(r.id, goalFromRow(r));
+        }),
+        this.pullTable<CategoryRow>('categories', (r) => {
+          if (r.deleted_at) this.store.applyRemoteCategory(r.id, null);
+          else this.store.applyRemoteCategory(r.id, categoryFromRow(r));
         }),
         this.pullTable<PomoSessionRow>('pomo_sessions', (r) => this.store.applyRemotePomoSession(pomoSessionFromRow(r) as PomoSession)),
         this.pullSettings(),

@@ -1,3 +1,4 @@
+import { GENERAL_CATEGORY_ID } from './categories';
 import type { PomodoroConfig } from './types';
 
 /**
@@ -42,6 +43,13 @@ export interface PomoState {
   segments: PomoSegment[];
   /** Arayüzde gösterilecek son tamamlanma olayı. */
   lastCompleted: PomoCompletion | null;
+  /**
+   * Seçili Pomodoro kategorisi (bkz. `core/categories.ts`) — yalnızca `status
+   * === 'idle'` iken değiştirilebilir (UI tarafından kısıtlanır, `phase`
+   * seçimiyle aynı desen). `start`/`pause`/`freshPhase` hepsi `...s` ile
+   * yaydığından buradaki değer aksi belirtilmedikçe korunur.
+   */
+  categoryId: string;
 }
 
 export type PomoSessionStatus = 'completed' | 'stopped';
@@ -64,6 +72,8 @@ export interface PomoSession {
   rating: number | null;
   /** İsteğe bağlı, seansla ilgili kısa not; girilmemişse boş dize. */
   note: string;
+  /** Bu seansın bağlı olduğu Pomodoro kategorisi (bkz. `core/categories.ts`); hiçbiri seçilmemişse `GENERAL_CATEGORY_ID`. */
+  categoryId: string;
 }
 
 export interface PomoResult {
@@ -91,6 +101,7 @@ export function initialPomo(cfg: PomodoroConfig): PomoState {
     runningSince: null,
     segments: [],
     lastCompleted: null,
+    categoryId: GENERAL_CATEGORY_ID,
   };
 }
 
@@ -146,6 +157,7 @@ function abandonFocus(s: PomoState, now: number): PomoSession | null {
     status: 'stopped',
     rating: null,
     note: '',
+    categoryId: s.categoryId,
   };
 }
 
@@ -228,6 +240,7 @@ export function settle(s: PomoState, cfg: PomodoroConfig, now: number): PomoResu
       status: 'completed',
       rating: null,
       note: '',
+      categoryId: s.categoryId,
     };
     cycleCount += 1;
     next = cycleCount % cfg.longEvery === 0 ? 'long' : 'short';
@@ -250,6 +263,7 @@ export function normalizePomoSession(raw: PomoSession): PomoSession {
     ...raw,
     rating: typeof raw.rating === 'number' ? raw.rating : null,
     note: typeof raw.note === 'string' ? raw.note : '',
+    categoryId: typeof raw.categoryId === 'string' && raw.categoryId ? raw.categoryId : GENERAL_CATEGORY_ID,
   };
 }
 
@@ -265,7 +279,7 @@ export function migrateLegacyPomoHistory(raw: unknown): PomoSession[] {
     if (!r || typeof r !== 'object') continue;
     const { id, at, ms } = r as { id?: unknown; at?: unknown; ms?: unknown };
     if (typeof id !== 'string' || typeof at !== 'number' || typeof ms !== 'number' || ms <= 0) continue;
-    out.push({ id, plannedMs: ms, startedAt: at - ms, endedAt: at, activeMs: ms, segments: [{ start: at - ms, end: at }], status: 'completed', rating: null, note: '' });
+    out.push({ id, plannedMs: ms, startedAt: at - ms, endedAt: at, activeMs: ms, segments: [{ start: at - ms, end: at }], status: 'completed', rating: null, note: '', categoryId: GENERAL_CATEGORY_ID });
   }
   return out;
 }

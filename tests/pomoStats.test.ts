@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { GENERAL_CATEGORY_ID } from '../src/core/categories';
 import type { PomoSession } from '../src/core/pomodoro';
 import { focusStatsForDay, sessionsTouchingDay, splitByLocalDay } from '../src/core/pomoStats';
 import { formatDuration, formatFocusSummary } from '../src/core/format';
@@ -30,7 +31,7 @@ describe('splitByLocalDay: gece yarısını geçen aralığın dağıtımı', ()
 });
 
 function session(over: Partial<PomoSession>): PomoSession {
-  return { id: 'x', plannedMs: 25 * 60_000, startedAt: 0, endedAt: 0, activeMs: 0, segments: [], status: 'completed', rating: null, note: '', ...over };
+  return { id: 'x', plannedMs: 25 * 60_000, startedAt: 0, endedAt: 0, activeMs: 0, segments: [], status: 'completed', rating: null, note: '', categoryId: GENERAL_CATEGORY_ID, ...over };
 }
 
 describe('focusStatsForDay / sessionsTouchingDay', () => {
