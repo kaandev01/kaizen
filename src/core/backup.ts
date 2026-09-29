@@ -1,5 +1,6 @@
 import type { Category, CategoryBudget } from './categories';
 import { migrateLegacyPomoHistory, type PomoSession, type PomoState } from './pomodoro';
+import type { Routine } from './routines';
 import type { AgendaItem, DayLog, DayRating, Goal, Habit, JournalEntry, Settings } from './types';
 
 /** Dışa aktarılan/geri yüklenen tüm veri. Sürüm bilgisi taşır (bkz. `parseBackup`). */
@@ -18,6 +19,7 @@ export interface Backup {
   goals: Goal[];
   categories: Category[];
   categoryBudgets: CategoryBudget[];
+  routines: Routine[];
 }
 
 export interface BackupSummary {
@@ -30,6 +32,7 @@ export interface BackupSummary {
   goals: number;
   categories: number;
   categoryBudgets: number;
+  routines: number;
 }
 
 export type ParseResult = { ok: true; data: Backup; summary: BackupSummary } | { ok: false; error: string };
@@ -48,6 +51,7 @@ function summarize(d: Backup): BackupSummary {
     goals: d.goals.length,
     categories: d.categories.length,
     categoryBudgets: d.categoryBudgets.length,
+    routines: d.routines.length,
   };
 }
 
@@ -86,6 +90,11 @@ export function parseBackup(raw: unknown, currentSchemaVersion: number): ParseRe
   // v3 → v4: kategori başına haftalık zaman bütçesi bu yedekte hiç yoktu.
   if ((r.schemaVersion as number) < 4) {
     if (!Array.isArray(r.categoryBudgets)) r.categoryBudgets = [];
+    r.schemaVersion = 4; // ARA sürüm — v4→v5 bloğunun kendi denetimi doğru çalışsın diye currentSchemaVersion'a ATLANMAZ
+  }
+  // v4 → v5: rutinler bu yedekte hiç yoktu. (Aktif rutin çalıştırması zaten hiç yedeklenmez.)
+  if ((r.schemaVersion as number) < 5) {
+    if (!Array.isArray(r.routines)) r.routines = [];
     r.schemaVersion = currentSchemaVersion;
   }
   if (!isArr(r.habits) || !r.habits.every((h) => hasStringId(h) && Array.isArray((h as Habit).revisions))) {
@@ -103,6 +112,7 @@ export function parseBackup(raw: unknown, currentSchemaVersion: number): ParseRe
     ['goals', 'hedef'],
     ['categories', 'kategori'],
     ['categoryBudgets', 'kategori bütçesi'],
+    ['routines', 'rutin'],
   ] as const) {
     if (!isArr(r[key])) return { ok: false, error: `Yedek dosyasındaki ${label} verisi bozuk.` };
   }
