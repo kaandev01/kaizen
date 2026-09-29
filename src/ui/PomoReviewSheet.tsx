@@ -7,7 +7,7 @@ import { useAppState, useStore } from './hooks';
  * öz-değerlendirme formu: 0-10 arası bir puan + kısa bir not. Tamamen
  * atlanabilir — "Kaydet"e basılmadan kapatılırsa hiçbir şey yazılmaz.
  */
-export function PomoReviewSheet({ sessionId, onClose }: { sessionId: string; onClose: () => void }) {
+export function PomoReviewSheet({ sessionId, onClose, autoTickedHabitNames }: { sessionId: string; onClose: () => void; autoTickedHabitNames?: string[] }) {
   const store = useStore();
   const { pomoSessions } = useAppState();
   const session = pomoSessions.find((s) => s.id === sessionId);
@@ -25,6 +25,9 @@ export function PomoReviewSheet({ sessionId, onClose }: { sessionId: string; onC
   return (
     <Sheet title="Seans nasıl geçti?" onClose={onClose} closeLabel="Atla" action={{ label: 'Kaydet', onClick: save }}>
       <div class="form">
+        {autoTickedHabitNames && autoTickedHabitNames.length > 0 && (
+          <p class="hint success">Bu kategoriye bağlı {autoTickedHabitNames.map((n) => `"${n}"`).join(', ')} alışkanlığına otomatik +1 eklendi.</p>
+        )}
         <div class="field">
           <span class="label">Değerlendirme (isteğe bağlı, 0-10)</span>
           <div class="rating-row of11" role="radiogroup" aria-label="Seans değerlendirmesi, 0 ile 10 arası">

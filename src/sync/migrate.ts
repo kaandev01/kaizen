@@ -7,7 +7,7 @@
  */
 import type { Snapshot } from '../storage/storage';
 import { openBestStorage } from '../storage/storage';
-import { agendaToRow, goalToRow, habitToRow, journalToRow, pomoSessionToRow, ratingToRow } from './mapping';
+import { agendaToRow, categoryToRow, goalToRow, habitToRow, journalToRow, pomoSessionToRow, ratingToRow } from './mapping';
 import { supabase } from './supabaseClient';
 
 export interface LegacySummary {
@@ -18,6 +18,7 @@ export interface LegacySummary {
   ratings: number;
   agenda: number;
   goals: number;
+  categories: number;
 }
 
 export interface LegacyMigration {
@@ -33,6 +34,7 @@ const summarize = (s: Snapshot): LegacySummary => ({
   ratings: s.ratings.length,
   agenda: s.agenda.length,
   goals: s.goals.length,
+  categories: s.categories.length,
 });
 
 /**
@@ -82,6 +84,9 @@ export async function importLegacyData(userId: string, snapshot: Snapshot): Prom
   }
   if (snapshot.pomoSessions.length) {
     jobs.push(supabase.from('pomo_sessions').upsert(snapshot.pomoSessions.map((s) => pomoSessionToRow(userId, s)), { ignoreDuplicates: true }));
+  }
+  if (snapshot.categories.length) {
+    jobs.push(supabase.from('categories').upsert(snapshot.categories.map((c) => categoryToRow(userId, c)), { ignoreDuplicates: true }));
   }
   const results = await Promise.all(jobs);
   for (const { error } of results) if (error) throw new Error(error.message);

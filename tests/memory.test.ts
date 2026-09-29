@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { GENERAL_CATEGORY_ID } from '../src/core/categories';
 import { snapshotForRange } from '../src/core/memory';
 import { monthRange } from '../src/core/periods';
 import type { AgendaItem, DayLog, DayRating, Goal, Habit, JournalEntry } from '../src/core/types';
@@ -12,6 +13,7 @@ const habit: Habit = {
   revisions: [{ from: '2026-01-01', target: 8, unit: 'bardak', schedule: { kind: 'daily' } }],
   createdAt: '2026-01-01',
   order: 0,
+  linkedCategoryId: null,
 };
 const log = (date: string, amount: number): DayLog => ({ key: `h1|${date}`, habitId: 'h1', date, amount, updatedAt: 0 });
 const entry = (date: string): JournalEntry => ({ id: date, date, text: 'x', source: 'typed', createdAt: 0, updatedAt: 0 });
@@ -80,6 +82,7 @@ describe('snapshotForRange', () => {
       status: 'completed' as const,
       rating: null,
       note: '',
+      categoryId: GENERAL_CATEGORY_ID,
     };
     const src = { habits: [], logs: [], pomoSessions: [spanning], journal: [], ratings: [], agenda: [], goals: [] };
     expect(snapshotForRange(src, range).pomoSessions).toEqual([spanning]);

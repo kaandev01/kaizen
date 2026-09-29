@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest';
+import { GENERAL_CATEGORY_ID } from '../src/core/categories';
 import * as p from '../src/core/pomodoro';
 import { DEFAULT_SETTINGS } from '../src/core/types';
 import { MemoryStorage } from '../src/storage/storage';
+import { SCHEMA_VERSION } from '../src/storage/store';
 import { FakeClock, makeStore } from './helpers';
 
 const cfg = DEFAULT_SETTINGS.pomodoro; // 25 / 5 / 15, her 4 odakta uzun mola
@@ -41,6 +43,7 @@ describe('Pomodoro durum makinesi', () => {
       status: 'completed',
       rating: null,
       note: '',
+      categoryId: GENERAL_CATEGORY_ID,
     });
     expect(r1.state).toMatchObject({ phase: 'short', status: 'idle', cycleCount: 1, remainingMs: 5 * MIN });
     expect(r1.state.lastCompleted).toMatchObject({ phase: 'focus', runId: 'r1' });
@@ -116,6 +119,7 @@ describe('Pomodoro durum makinesi', () => {
       status: 'stopped',
       rating: null,
       note: '',
+      categoryId: GENERAL_CATEGORY_ID,
     });
     expect(state).toMatchObject({ status: 'idle', phase: 'focus', cycleCount: 0, remainingMs: 25 * MIN, runId: '' });
     // 'stopped' kayıt tamamlanan sayısına (cycleCount) hiçbir şekilde eklenmez.
@@ -224,6 +228,7 @@ describe('Pomodoro kalıcılık ve yeniden açılış (Store)', () => {
       status: 'completed',
       rating: null,
       note: '',
+      categoryId: GENERAL_CATEGORY_ID,
     });
     clock.advanceMs(30 * MIN);
     const b = await makeStore(clock, storage);
@@ -268,11 +273,11 @@ describe('şema göçü: v1 pomoHistory → v2 pomoSessions', () => {
     await storage.putMeta('pomoHistory', [{ id: 'eski-1', at: T0 + 25 * MIN, ms: 25 * MIN }]);
     const { store } = await makeStore(new FakeClock(2026, 9, 21), storage);
     expect(store.getState().pomoSessions).toEqual([
-      { id: 'eski-1', plannedMs: 25 * MIN, startedAt: T0, endedAt: T0 + 25 * MIN, activeMs: 25 * MIN, segments: [{ start: T0, end: T0 + 25 * MIN }], status: 'completed', rating: null, note: '' },
+      { id: 'eski-1', plannedMs: 25 * MIN, startedAt: T0, endedAt: T0 + 25 * MIN, activeMs: 25 * MIN, segments: [{ start: T0, end: T0 + 25 * MIN }], status: 'completed', rating: null, note: '', categoryId: GENERAL_CATEGORY_ID },
     ]);
     await store.flush();
     const snap = await storage.load();
-    expect(snap.meta.schemaVersion).toBe(2);
+    expect(snap.meta.schemaVersion).toBe(SCHEMA_VERSION);
     expect(snap.pomoSessions).toHaveLength(1);
   });
 
@@ -364,7 +369,7 @@ describe('Seans değerlendirmesi (rating/not)', () => {
       activeMs: 25 * MIN,
       segments: [{ start: T0, end: T0 + 25 * MIN }],
       status: 'completed' as const,
-    } as p.PomoSession; // eski şema: rating/note hiç yok
-    expect(p.normalizePomoSession(legacy)).toMatchObject({ rating: null, note: '' });
+    } as p.PomoSession; // eski şema: rating/note/categoryId hiç yok
+    expect(p.normalizePomoSession(legacy)).toMatchObject({ rating: null, note: '', categoryId: GENERAL_CATEGORY_ID });
   });
 });

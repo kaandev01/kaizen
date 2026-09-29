@@ -55,6 +55,9 @@ create table if not exists habits (
   revisions jsonb not null default '[]'::jsonb,
   created_at date not null,
   "order" integer not null default 0,
+  -- İsteğe bağlı: bu kategoride (veya bir alt kategorisinde) tamamlanan bir
+  -- Pomodoro seansı bu alışkanlığı otomatik tikler. FK yok — bkz. categories.
+  linked_category_id text,
   deleted_at timestamptz,
   server_updated_at timestamptz not null default now()
 );
@@ -157,6 +160,9 @@ create table if not exists pomo_sessions (
   status text not null,
   rating integer,
   note text not null default '',
+  -- Kategori seçilmeden başlatılan (ve tüm eski) seanslar yerleşik "general"
+  -- kategorisine düşer — hiçbir seans asla kategorisiz kalmaz.
+  category_id text not null default 'general',
   server_updated_at timestamptz not null default now()
 );
 alter table pomo_sessions enable row level security;
@@ -260,4 +266,31 @@ create policy "goals_insert_own" on goals for insert with check (auth.uid() = us
 create policy "goals_update_own" on goals for update using (auth.uid() = user_id) with check (auth.uid() = user_id);
 create index if not exists goals_user_sync_idx on goals (user_id, server_updated_at);
 create trigger trg_goals_touch before insert or update on goals
+  for each row execute function kaizen_touch_updated_at();
+
+-- =========================================================================
+-- categories — Pomodoro kategorileri (sınırsız iç içe klasör ağacı).
+-- id METİN (uuid DEĞİL): yerleşik "general" kategorisi sabit bir id kullanır;
+-- diğerleri istemcide üretilen uuid metnini taşır. Ebeveyn ilişkisine ve
+-- habits/pomo_sessions'daki referanslara bilinçli olarak FK KONULMADI —
+-- derinlik/sıra istemcide saf fonksiyonlarla yönetiliyor, senkron sırası
+-- hiçbir tabloda başka bir tabloya bağımlı olmasın diye basit tutuldu.
+-- =========================================================================
+create table if not exists categories (
+  id text primary key,
+  user_id uuid not null references auth.users(id) on delete cascade,
+  name text not null,
+  parent_id text,
+  color text not null default '',
+  "order" integer not null default 0,
+  created_at bigint not null,
+  deleted_at timestamptz,
+  server_updated_at timestamptz not null default now()
+);
+alter table categories enable row level security;
+create policy "categories_select_own" on categories for select using (auth.uid() = user_id);
+create policy "categories_insert_own" on categories for insert with check (auth.uid() = user_id);
+create policy "categories_update_own" on categories for update using (auth.uid() = user_id) with check (auth.uid() = user_id);
+create index if not exists categories_user_sync_idx on categories (user_id, server_updated_at);
+create trigger trg_categories_touch before insert or update on categories
   for each row execute function kaizen_touch_updated_at();

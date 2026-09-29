@@ -1,3 +1,4 @@
+import type { Category } from '../core/categories';
 import type { PomoSession } from '../core/pomodoro';
 import type { AgendaItem, DayLog, DayRating, Goal, Habit, JournalEntry } from '../core/types';
 import type { OutboxEntry } from '../sync/types';
@@ -10,6 +11,7 @@ export interface Snapshot {
   ratings: DayRating[];
   agenda: AgendaItem[];
   goals: Goal[];
+  categories: Category[];
   meta: Record<string, unknown>;
 }
 
@@ -39,6 +41,8 @@ export interface Storage {
   removeAgendaItem(id: string): Promise<void>;
   putGoal(goal: Goal): Promise<void>;
   removeGoal(id: string): Promise<void>;
+  putCategory(category: Category): Promise<void>;
+  removeCategory(id: string): Promise<void>;
   /** Tüm verinin yerini alır (yedek geri yükleme); tek işlemde, ya hep ya hiç. */
   replaceAll(snapshot: FullSnapshot): Promise<void>;
 
@@ -58,6 +62,7 @@ export class MemoryStorage implements Storage {
   private ratings = new Map<string, DayRating>();
   private agenda = new Map<string, AgendaItem>();
   private goals = new Map<string, Goal>();
+  private categories = new Map<string, Category>();
   private meta = new Map<string, unknown>();
   private outbox = new Map<string, OutboxEntry>();
 
@@ -70,6 +75,7 @@ export class MemoryStorage implements Storage {
       ratings: structuredClone([...this.ratings.values()]),
       agenda: structuredClone([...this.agenda.values()]),
       goals: structuredClone([...this.goals.values()]),
+      categories: structuredClone([...this.categories.values()]),
       meta: structuredClone(Object.fromEntries(this.meta)),
     };
   }
@@ -119,6 +125,12 @@ export class MemoryStorage implements Storage {
   async removeGoal(id: string) {
     this.goals.delete(id);
   }
+  async putCategory(c: Category) {
+    this.categories.set(c.id, structuredClone(c));
+  }
+  async removeCategory(id: string) {
+    this.categories.delete(id);
+  }
   async replaceAll(snap: FullSnapshot) {
     this.habits = new Map(snap.habits.map((h) => [h.id, structuredClone(h)]));
     this.logs = new Map(snap.logs.map((l) => [l.key, structuredClone(l)]));
@@ -127,6 +139,7 @@ export class MemoryStorage implements Storage {
     this.ratings = new Map(snap.ratings.map((r) => [r.date, structuredClone(r)]));
     this.agenda = new Map(snap.agenda.map((a) => [a.id, structuredClone(a)]));
     this.goals = new Map(snap.goals.map((g) => [g.id, structuredClone(g)]));
+    this.categories = new Map(snap.categories.map((c) => [c.id, structuredClone(c)]));
     this.meta = new Map(Object.entries(structuredClone(snap.meta)));
   }
 
@@ -146,10 +159,12 @@ export class MemoryStorage implements Storage {
  * ratings/agenda/goals depoları eklendi (bkz. store.ts'teki SCHEMA_VERSION
  * göçü — eski meta.pomoHistory buraya taşınır). v3: `outbox` deposu eklendi
  * (bulut senkronu için giden kuyruk) — geriye dönük veri göçü gerekmez, yalnızca
- * yeni boş bir store eklenir.
+ * yeni boş bir store eklenir. v4: `categories` deposu eklendi (Pomodoro
+ * kategorileri/klasör sistemi) — "Genel" kategorisi store.ts'teki init()
+ * göçünde oluşturulur.
  */
-const DB_VERSION = 3;
-const STORES = ['habits', 'logs', 'pomoSessions', 'journal', 'ratings', 'agenda', 'goals', 'meta', 'outbox'] as const;
+const DB_VERSION = 4;
+const STORES = ['habits', 'logs', 'pomoSessions', 'journal', 'ratings', 'agenda', 'goals', 'categories', 'meta', 'outbox'] as const;
 /** `replaceAll` bu depoları TEMİZLEMEZ — outbox'ı bir yedek geri yükleme silmemeli (bekleyen senkron kaybolmasın). */
 const REPLACE_ALL_STORES = STORES.filter((s) => s !== 'outbox');
 
@@ -186,6 +201,7 @@ export class IndexedDbStorage implements Storage {
         if (!db.objectStoreNames.contains('ratings')) db.createObjectStore('ratings', { keyPath: 'date' });
         if (!db.objectStoreNames.contains('agenda')) db.createObjectStore('agenda', { keyPath: 'id' }).createIndex('date', 'date');
         if (!db.objectStoreNames.contains('goals')) db.createObjectStore('goals', { keyPath: 'id' });
+        if (!db.objectStoreNames.contains('categories')) db.createObjectStore('categories', { keyPath: 'id' });
         if (!db.objectStoreNames.contains('outbox')) db.createObjectStore('outbox', { keyPath: 'opId' });
       };
       open.onsuccess = () => resolve(new IndexedDbStorage(open.result));
@@ -199,8 +215,8 @@ export class IndexedDbStorage implements Storage {
   }
 
   async load(): Promise<Snapshot> {
-    const tx = this.db.transaction(['habits', 'logs', 'pomoSessions', 'journal', 'ratings', 'agenda', 'goals', 'meta'], 'readonly');
-    const [habits, logs, pomoSessions, journal, ratings, agenda, goals, metaRows] = await Promise.all([
+    const tx = this.db.transaction(['habits', 'logs', 'pomoSessions', 'journal', 'ratings', 'agenda', 'goals', 'categories', 'meta'], 'readonly');
+    const [habits, logs, pomoSessions, journal, ratings, agenda, goals, categories, metaRows] = await Promise.all([
       req(tx.objectStore('habits').getAll() as IDBRequest<Habit[]>),
       req(tx.objectStore('logs').getAll() as IDBRequest<DayLog[]>),
       req(tx.objectStore('pomoSessions').getAll() as IDBRequest<PomoSession[]>),
@@ -208,9 +224,10 @@ export class IndexedDbStorage implements Storage {
       req(tx.objectStore('ratings').getAll() as IDBRequest<DayRating[]>),
       req(tx.objectStore('agenda').getAll() as IDBRequest<AgendaItem[]>),
       req(tx.objectStore('goals').getAll() as IDBRequest<Goal[]>),
+      req(tx.objectStore('categories').getAll() as IDBRequest<Category[]>),
       req(tx.objectStore('meta').getAll() as IDBRequest<{ key: string; value: unknown }[]>),
     ]);
-    return { habits, logs, pomoSessions, journal, ratings, agenda, goals, meta: Object.fromEntries(metaRows.map((r) => [r.key, r.value])) };
+    return { habits, logs, pomoSessions, journal, ratings, agenda, goals, categories, meta: Object.fromEntries(metaRows.map((r) => [r.key, r.value])) };
   }
 
   async putHabit(h: Habit) {
@@ -308,6 +325,17 @@ export class IndexedDbStorage implements Storage {
     await done(tx);
   }
 
+  async putCategory(c: Category) {
+    const tx = this.db.transaction('categories', 'readwrite');
+    tx.objectStore('categories').put(c);
+    await done(tx);
+  }
+  async removeCategory(id: string) {
+    const tx = this.db.transaction('categories', 'readwrite');
+    tx.objectStore('categories').delete(id);
+    await done(tx);
+  }
+
   async putOutboxEntry(entry: OutboxEntry) {
     const tx = this.db.transaction('outbox', 'readwrite');
     tx.objectStore('outbox').put(entry);
@@ -334,6 +362,7 @@ export class IndexedDbStorage implements Storage {
     for (const r of snap.ratings) tx.objectStore('ratings').put(r);
     for (const a of snap.agenda) tx.objectStore('agenda').put(a);
     for (const g of snap.goals) tx.objectStore('goals').put(g);
+    for (const c of snap.categories) tx.objectStore('categories').put(c);
     for (const [key, value] of Object.entries(snap.meta)) tx.objectStore('meta').put({ key, value });
     await done(tx);
   }

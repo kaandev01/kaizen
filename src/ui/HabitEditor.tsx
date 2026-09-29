@@ -1,15 +1,18 @@
 import { useState } from 'preact/hooks';
+import { categoryPath } from '../core/categories';
 import { dayShort } from '../core/dates';
 import { showUnit } from '../core/format';
 import { currentRevision } from '../core/plan';
 import type { Habit, Schedule } from '../core/types';
 import { MAX_TARGET, validateHabitInput, type HabitInput } from '../core/validation';
+import { CategoryPicker } from './CategoryPicker';
 import { ConfirmDialog, Icon, Segmented, Sheet } from './components';
-import { useStore } from './hooks';
+import { useAppState, useStore } from './hooks';
 import { DEFAULT_HABIT_ICON } from './icons';
+import { COLORS } from './palette';
 import { cancelHabitNotifications, isIOS, isStandalone, type PermState } from './platform';
 
-export const COLORS = ['#5a4bcf', '#2e9d63', '#b7832f', '#8f7ae8', '#d9534f', '#1f8fb5', '#d6409f', '#64748b'];
+export { COLORS };
 const UNITS = ['kez', 'bardak', 'sayfa', 'dk'];
 /** Gün daireleri: Pazartesi..Pazar baş harfleri. */
 const DAY_INITIAL = ['P', 'S', 'Ç', 'P', 'C', 'C', 'P'];
@@ -21,6 +24,7 @@ export function scheduleSummary(s: Schedule): string {
 
 export function HabitEditor({ habit, onClose }: { habit?: Habit; onClose: () => void }) {
   const store = useStore();
+  const { categories } = useAppState();
   const rev = habit ? currentRevision(habit) : undefined;
 
   const [name, setName] = useState(habit?.name ?? '');
@@ -39,6 +43,8 @@ export function HabitEditor({ habit, onClose }: { habit?: Habit; onClose: () => 
   // Hatırlatıcı arayüzden kaldırıldı (sadeleştirme); mevcut hatırlatmalar
   // değiştirilmeden korunur, yeni alışkanlıklarda hiç ayarlanamaz.
   const reminders = habit?.reminders ?? [];
+  const [linkedCategoryId, setLinkedCategoryId] = useState<string | null>(habit?.linkedCategoryId ?? null);
+  const [categoryPickerOpen, setCategoryPickerOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
 
@@ -53,6 +59,7 @@ export function HabitEditor({ habit, onClose }: { habit?: Habit; onClose: () => 
     unit,
     schedule: scheduleKind === 'daily' ? { kind: 'daily' } : { kind: 'weekdays', days },
     reminders,
+    linkedCategoryId,
   });
 
   const save = () => {
@@ -143,6 +150,15 @@ export function HabitEditor({ habit, onClose }: { habit?: Habit; onClose: () => 
             {habit && <p class="hint">Hedef ve tekrar değişiklikleri bugünden itibaren geçerli olur; geçmiş günler eski düzenle korunur.</p>}
           </div>
 
+          <button class="setting link" onClick={() => setCategoryPickerOpen(true)}>
+            <span class="grow">
+              Bağlı kategori (isteğe bağlı)
+              <span class="muted small block">{linkedCategoryId ? categoryPath(categories, linkedCategoryId).map((c) => c.name).join(' ▸ ') : 'Yok'}</span>
+            </span>
+            <Icon name="chevronRight" size={18} />
+          </button>
+          <p class="hint">Bağlarsan, o kategoride (ya da bir alt kategorisinde) bir Pomodoro seansı tamamlanınca bu alışkanlık otomatik "+1" tiklenir.</p>
+
           {error && (
             <p class="error" role="alert">
               {error}
@@ -173,6 +189,15 @@ export function HabitEditor({ habit, onClose }: { habit?: Habit; onClose: () => 
             void cancelHabitNotifications(habit.id);
             onClose();
           }}
+        />
+      )}
+
+      {categoryPickerOpen && (
+        <CategoryPicker
+          selectedId={linkedCategoryId}
+          allowNone
+          onSelect={setLinkedCategoryId}
+          onClose={() => setCategoryPickerOpen(false)}
         />
       )}
     </>

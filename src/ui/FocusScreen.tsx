@@ -1,8 +1,10 @@
 import { useState } from 'preact/hooks';
+import { categoryPath, categoryStatsForDay, GENERAL_CATEGORY_ID } from '../core/categories';
 import { toDateKey } from '../core/dates';
 import { formatDuration } from '../core/format';
 import { remainingNow, type Phase } from '../core/pomodoro';
 import { focusStatsForDay } from '../core/pomoStats';
+import { CategoryPicker } from './CategoryPicker';
 import { Icon, Ring, Segmented } from './components';
 import { Durations } from './Durations';
 import { useAppState, useNow, useStore } from './hooks';
@@ -22,8 +24,9 @@ const spoken = (ms: number) => {
 
 export function FocusScreen() {
   const store = useStore();
-  const { pomodoro: p, settings, pomoSessions } = useAppState();
+  const { pomodoro: p, settings, pomoSessions, categories } = useAppState();
   const [durationsOpen, setDurationsOpen] = useState(false);
+  const [categoryPickerOpen, setCategoryPickerOpen] = useState(false);
   const running = p.status === 'running';
   const now = useNow(250, running);
   const remaining = remainingNow(p, running ? now : Date.now());
@@ -33,6 +36,14 @@ export function FocusScreen() {
 
   const todayKey = toDateKey(new Date());
   const todayStats = focusStatsForDay(pomoSessions, todayKey);
+  const categoryStats = categoryStatsForDay(pomoSessions, categories, todayKey);
+  const categoryBreakdown = categories
+    .map((c) => ({ name: c.name, ms: categoryStats.get(c.id) ?? 0 }))
+    .filter((c) => c.ms > 0)
+    .sort((a, b) => b.ms - a.ms);
+  const selectedPath = categoryPath(categories, p.categoryId)
+    .map((c) => c.name)
+    .join(' ▸ ');
 
   const act = (fn: () => void) => () => {
     unlockAudio(); // iOS: ses, kullanıcı dokunuşuyla açılır
@@ -58,6 +69,14 @@ export function FocusScreen() {
           <Icon name="sliders" size={20} />
         </button>
       </header>
+
+      <button class="setting link solo" disabled={p.status !== 'idle'} onClick={() => setCategoryPickerOpen(true)}>
+        <span class="grow">
+          Kategori
+          <span class="muted small block">{selectedPath || 'Genel'}</span>
+        </span>
+        {p.status === 'idle' && <Icon name="chevronRight" size={18} />}
+      </button>
 
       <Segmented<Phase>
         class="wide"
@@ -115,6 +134,16 @@ export function FocusScreen() {
       <p class="today-line">
         Bugün <b>{todayStats.completedCount} Pomodoro</b> · <b>{formatDuration(todayStats.activeMs)}</b>
       </p>
+      {categoryBreakdown.length > 0 && (
+        <ul class="category-breakdown">
+          {categoryBreakdown.map((c) => (
+            <li key={c.name}>
+              <span class="grow">{c.name}</span>
+              <span class="muted small">{formatDuration(c.ms)}</span>
+            </li>
+          ))}
+        </ul>
+      )}
 
       <div class="collapsible">
         <button class="collapsible-head" aria-expanded={durationsOpen} onClick={() => setDurationsOpen((o) => !o)}>
@@ -133,6 +162,8 @@ export function FocusScreen() {
         Sıfırlanan veya yarım bırakılan seans sayılmaz.{' '}
         {isIOS() ? 'iPhone’da uygulama kapalıyken veya ekran kilitliyken sayaç bildirimi gönderemez; süre dolunca uygulamayı açtığında kalan süre doğru görünür.' : ''}
       </p>
+
+      {categoryPickerOpen && <CategoryPicker selectedId={p.categoryId} onSelect={(id) => store.pomoSetCategory(id ?? GENERAL_CATEGORY_ID)} onClose={() => setCategoryPickerOpen(false)} />}
     </section>
   );
 }
