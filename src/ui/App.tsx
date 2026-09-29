@@ -9,6 +9,7 @@ import { goToAgendaItem, setNavigate, type Tab } from './nav';
 import { beep, cancelPomodoroEnd, haptic, schedulePomodoroEnd, setWakeLock, showNotification } from './platform';
 import { PomoReviewSheet } from './PomoReviewSheet';
 import { SettingsScreen } from './SettingsScreen';
+import { useSyncStatus } from './syncStatus';
 import { TodayScreen } from './TodayScreen';
 
 interface Notice {
@@ -27,6 +28,7 @@ const TABS: { id: Tab; label: string; icon: 'today' | 'hourglass' | 'calendar' }
 export function App() {
   const store = useStore();
   const state = useAppState();
+  const syncStatus = useSyncStatus();
   const [tab, setTab] = useState<Tab>('today');
   const [notice, setNotice] = useState<Notice | null>(null);
   const noticeTimer = useRef<ReturnType<typeof setTimeout>>();
@@ -145,6 +147,14 @@ export function App() {
       {state.persistError && (
         <div class="notice warn top" role="alert">
           {state.persistError}
+        </div>
+      )}
+      {/* Buluta gönderilemeyen bir kaydı asla "gönderilmiş" gibi göstermemek için:
+          yalnızca kuyrukta bekleyen değişiklik VARKEN (error/offline) görünür,
+          her şey senkronsa (idle) hiçbir şey göstermez — ana ekran sade kalır. */}
+      {!state.persistError && (syncStatus === 'error' || syncStatus === 'offline') && (
+        <div class="notice warn top" role="status">
+          {syncStatus === 'offline' ? 'Çevrimdışısın — değişiklikler bağlanınca buluta gönderilecek.' : 'Bazı değişiklikler henüz buluta gönderilemedi, tekrar denenecek.'}
         </div>
       )}
       {notice && (

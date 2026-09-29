@@ -28,3 +28,8 @@ jobs:
       - run: npm run typecheck
       - run: npm test
       - run: npm run build
+        env:
+          # Secrets tanımlı değilse (ör. fork PR'ları) boş kalır — uygulama bulutsuz
+          # modda derlenmeye devam eder (bkz. src/sync/supabaseClient.ts), CI kırılmaz.
+          VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
+          VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}

@@ -10,6 +10,12 @@ export function useStore(): Store {
   if (!current) throw new Error('Store hazır değil');
   return current;
 }
+/** Şu an aktif olan store'u (varsa) kalıcı yazmaların bitmesini beklemek için kullanır
+ * (ör. sekme kapanırken) — `Root.tsx` hesap değişince store'u değiştirdiğinden, sabit bir
+ * referans yerine her zaman GÜNCEL store'u işaret eden bu dolaylama kullanılır. */
+export function flushCurrentStore(): Promise<void> {
+  return current?.flush() ?? Promise.resolve();
+}
 
 /** Store durumuna abone olur; her değişimde yeniden çizer. */
 export function useAppState(): AppState {
