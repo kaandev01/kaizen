@@ -209,7 +209,7 @@ function UpcomingCard() {
       </div>
       <ul class="agenda-list">
         {items.map((item) => (
-          <AgendaRow key={item.id} item={item} now={now} onOpen={() => setOpenItem(item)} onToggleDone={() => store.setAgendaDone(item.id, !item.done)} showDate />
+          <AgendaRow key={item.id} item={item} now={now} onOpen={() => setOpenItem(item)} onToggleDone={() => store.setAgendaDone(item.id, !item.done)} compactDate />
         ))}
       </ul>
       {openItem && <AgendaEditor item={openItem} defaultDate={openItem.date} onClose={() => setOpenItem(null)} />}

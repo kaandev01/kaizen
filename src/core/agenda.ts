@@ -1,4 +1,4 @@
-import { atLocalTime, daysBetween, toDateKey, type DateKey } from './dates';
+import { atLocalTime, daysBetween, formatDayMonthMaybeYear, toDateKey, type DateKey } from './dates';
 import type { AgendaItem, AgendaReminder, ReminderOffsetKind } from './types';
 
 /** Eski/eksik kayıtlara (şema genişlemesinden önce saklanmış olabilir) güvenli varsayılanlar uygular. */
@@ -54,6 +54,28 @@ export function formatUrgencyPhrase(item: AgendaItem, now: Date): string {
   const days = daysBetween(today, item.date);
   if (days === 1) return item.time ? `Yarın ${item.time}` : 'Yarın';
   return `${days} gün kaldı`;
+}
+
+/**
+ * "Yaklaşan" gibi kompakt listeler için TEK bir tarih/aciliyet etiketi —
+ * `formatShortDate` + `formatUrgencyPhrase`'in birlikte ürettiği çift bilgiyi
+ * ("29.09 · Bugün") tek, sadeleştirilmiş bir ifadeye indirger: "Bugün",
+ * "Yarın", "12 Ekim" (farklı yıldaysa "12 Ekim 2027"), saatliyse virgülle
+ * ("Bugün, 18:00"), gecikmişse "N gün gecikti" — bugün saati geçmişse dakika/
+ * saat bazlı ("2 saat gecikti").
+ */
+export function formatAgendaDateLabel(item: AgendaItem, now: Date): string {
+  const today = toDateKey(now);
+  if (isOverdue(item, now)) {
+    if (item.date === today && item.time) {
+      const diffMin = Math.max(1, Math.floor((now.getTime() - atLocalTime(item.date, item.time)) / 60_000));
+      return diffMin < 60 ? `${diffMin} dakika gecikti` : `${Math.floor(diffMin / 60)} saat gecikti`;
+    }
+    return `${daysBetween(item.date, today)} gün gecikti`;
+  }
+  const days = daysBetween(today, item.date);
+  const dateLabel = days === 0 ? 'Bugün' : days === 1 ? 'Yarın' : formatDayMonthMaybeYear(item.date, now.getFullYear());
+  return item.time ? `${dateLabel}, ${item.time}` : dateLabel;
 }
 
 /** Sıralama anahtarı: tarih, sonra saat (saat yoksa günün başı — tüm günlükler önce gelir). */
