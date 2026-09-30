@@ -1506,10 +1506,7 @@ button:disabled {
   margin-top: 10px;
 }
 
-/* ---- Bugün: Rutinler giriş noktası + Yaklaşan bölümü ---------------------- */
-.routines-entry {
-  margin-top: 18px;
-}
+/* ---- Bugün: Yaklaşan bölümü ------------------------------------------------ */
 .upcoming-card {
   margin-top: 18px;
 }
