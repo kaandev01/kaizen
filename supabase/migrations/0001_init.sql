@@ -343,3 +343,26 @@ create policy "routines_update_own" on routines for update using (auth.uid() = u
 create index if not exists routines_user_sync_idx on routines (user_id, server_updated_at);
 create trigger trg_routines_touch before insert or update on routines
   for each row execute function kaizen_touch_updated_at();
+
+-- =========================================================================
+-- inbox_notes — hızlı yakalama / gelen kutusu. `converted_to` (jsonb, null
+-- olabilir) bir notun hangi kayda (ajanda/günlük/hedef, hangi id'yle)
+-- dönüştürüldüğünü tutar; dönüşüm SİLMEZ, yalnızca bu alanı doldurur.
+-- =========================================================================
+create table if not exists inbox_notes (
+  id uuid primary key,
+  user_id uuid not null references auth.users(id) on delete cascade,
+  text text not null,
+  converted_to jsonb,
+  created_at bigint not null,
+  updated_at bigint not null,
+  deleted_at timestamptz,
+  server_updated_at timestamptz not null default now()
+);
+alter table inbox_notes enable row level security;
+create policy "inbox_notes_select_own" on inbox_notes for select using (auth.uid() = user_id);
+create policy "inbox_notes_insert_own" on inbox_notes for insert with check (auth.uid() = user_id);
+create policy "inbox_notes_update_own" on inbox_notes for update using (auth.uid() = user_id) with check (auth.uid() = user_id);
+create index if not exists inbox_notes_user_sync_idx on inbox_notes (user_id, server_updated_at);
+create trigger trg_inbox_notes_touch before insert or update on inbox_notes
+  for each row execute function kaizen_touch_updated_at();

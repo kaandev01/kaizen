@@ -1,4 +1,5 @@
 import type { Category, CategoryBudget } from './categories';
+import type { InboxNote } from './inbox';
 import { migrateLegacyPomoHistory, type PomoSession, type PomoState } from './pomodoro';
 import type { Routine } from './routines';
 import type { AgendaItem, DayLog, DayRating, Goal, Habit, JournalEntry, Settings } from './types';
@@ -20,6 +21,7 @@ export interface Backup {
   categories: Category[];
   categoryBudgets: CategoryBudget[];
   routines: Routine[];
+  inboxNotes: InboxNote[];
 }
 
 export interface BackupSummary {
@@ -33,6 +35,7 @@ export interface BackupSummary {
   categories: number;
   categoryBudgets: number;
   routines: number;
+  inboxNotes: number;
 }
 
 export type ParseResult = { ok: true; data: Backup; summary: BackupSummary } | { ok: false; error: string };
@@ -52,6 +55,7 @@ function summarize(d: Backup): BackupSummary {
     categories: d.categories.length,
     categoryBudgets: d.categoryBudgets.length,
     routines: d.routines.length,
+    inboxNotes: d.inboxNotes.length,
   };
 }
 
@@ -95,6 +99,11 @@ export function parseBackup(raw: unknown, currentSchemaVersion: number): ParseRe
   // v4 → v5: rutinler bu yedekte hiç yoktu. (Aktif rutin çalıştırması zaten hiç yedeklenmez.)
   if ((r.schemaVersion as number) < 5) {
     if (!Array.isArray(r.routines)) r.routines = [];
+    r.schemaVersion = 5; // ARA sürüm — v5→v6 bloğunun kendi denetimi doğru çalışsın diye currentSchemaVersion'a ATLANMAZ
+  }
+  // v5 → v6: hızlı yakalama / gelen kutusu notları bu yedekte hiç yoktu.
+  if ((r.schemaVersion as number) < 6) {
+    if (!Array.isArray(r.inboxNotes)) r.inboxNotes = [];
     r.schemaVersion = currentSchemaVersion;
   }
   if (!isArr(r.habits) || !r.habits.every((h) => hasStringId(h) && Array.isArray((h as Habit).revisions))) {
@@ -113,6 +122,7 @@ export function parseBackup(raw: unknown, currentSchemaVersion: number): ParseRe
     ['categories', 'kategori'],
     ['categoryBudgets', 'kategori bütçesi'],
     ['routines', 'rutin'],
+    ['inboxNotes', 'gelen kutusu notu'],
   ] as const) {
     if (!isArr(r[key])) return { ok: false, error: `Yedek dosyasındaki ${label} verisi bozuk.` };
   }

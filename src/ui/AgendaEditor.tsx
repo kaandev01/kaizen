@@ -21,9 +21,22 @@ const IMPORTANCE_OPTIONS: { value: AgendaImportance; label: string }[] = [
 ];
 const TOGGLE_KINDS: Exclude<ReminderOffsetKind, 'custom'>[] = ['1w', '1d', '1h', 'exact'];
 
-export function AgendaEditor({ item, defaultDate, onClose, onSaved }: { item?: AgendaItem; defaultDate: DateKey; onClose: () => void; onSaved?: (item: AgendaItem) => void }) {
+export function AgendaEditor({
+  item,
+  defaultDate,
+  initialTitle,
+  onClose,
+  onSaved,
+}: {
+  item?: AgendaItem;
+  defaultDate: DateKey;
+  /** Yalnızca oluşturma modunda tohum değeri olarak kullanılır (ör. Gelen Kutusu'ndan dönüştürme). */
+  initialTitle?: string;
+  onClose: () => void;
+  onSaved?: (item: AgendaItem) => void;
+}) {
   const store = useStore();
-  const [title, setTitle] = useState(item?.title ?? '');
+  const [title, setTitle] = useState(item?.title ?? initialTitle ?? '');
   const [kind, setKind] = useState<AgendaKind>(item?.kind ?? 'todo');
   const [date, setDate] = useState<DateKey>(item?.date ?? defaultDate);
   const [allDay, setAllDay] = useState(item ? item.time === null : true);
