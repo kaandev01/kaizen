@@ -1,4 +1,5 @@
 import type { Category, CategoryBudget } from '../core/categories';
+import type { InboxNote } from '../core/inbox';
 import type { PomoSession } from '../core/pomodoro';
 import type { Routine } from '../core/routines';
 import type { AgendaItem, DayLog, DayRating, Goal, Habit, JournalEntry } from '../core/types';
@@ -15,6 +16,7 @@ export interface Snapshot {
   categories: Category[];
   categoryBudgets: CategoryBudget[];
   routines: Routine[];
+  inboxNotes: InboxNote[];
   meta: Record<string, unknown>;
 }
 
@@ -50,6 +52,8 @@ export interface Storage {
   removeCategoryBudget(categoryId: string): Promise<void>;
   putRoutine(routine: Routine): Promise<void>;
   removeRoutine(id: string): Promise<void>;
+  putInboxNote(note: InboxNote): Promise<void>;
+  removeInboxNote(id: string): Promise<void>;
   /** Tüm verinin yerini alır (yedek geri yükleme); tek işlemde, ya hep ya hiç. */
   replaceAll(snapshot: FullSnapshot): Promise<void>;
 
@@ -72,6 +76,7 @@ export class MemoryStorage implements Storage {
   private categories = new Map<string, Category>();
   private categoryBudgets = new Map<string, CategoryBudget>();
   private routines = new Map<string, Routine>();
+  private inboxNotes = new Map<string, InboxNote>();
   private meta = new Map<string, unknown>();
   private outbox = new Map<string, OutboxEntry>();
 
@@ -87,6 +92,7 @@ export class MemoryStorage implements Storage {
       categories: structuredClone([...this.categories.values()]),
       categoryBudgets: structuredClone([...this.categoryBudgets.values()]),
       routines: structuredClone([...this.routines.values()]),
+      inboxNotes: structuredClone([...this.inboxNotes.values()]),
       meta: structuredClone(Object.fromEntries(this.meta)),
     };
   }
@@ -154,6 +160,12 @@ export class MemoryStorage implements Storage {
   async removeRoutine(id: string) {
     this.routines.delete(id);
   }
+  async putInboxNote(n: InboxNote) {
+    this.inboxNotes.set(n.id, structuredClone(n));
+  }
+  async removeInboxNote(id: string) {
+    this.inboxNotes.delete(id);
+  }
   async replaceAll(snap: FullSnapshot) {
     this.habits = new Map(snap.habits.map((h) => [h.id, structuredClone(h)]));
     this.logs = new Map(snap.logs.map((l) => [l.key, structuredClone(l)]));
@@ -165,6 +177,7 @@ export class MemoryStorage implements Storage {
     this.categories = new Map(snap.categories.map((c) => [c.id, structuredClone(c)]));
     this.categoryBudgets = new Map(snap.categoryBudgets.map((b) => [b.categoryId, structuredClone(b)]));
     this.routines = new Map(snap.routines.map((r) => [r.id, structuredClone(r)]));
+    this.inboxNotes = new Map(snap.inboxNotes.map((n) => [n.id, structuredClone(n)]));
     this.meta = new Map(Object.entries(structuredClone(snap.meta)));
   }
 
@@ -191,10 +204,11 @@ export class MemoryStorage implements Storage {
  * "hedef yok" sayılır). v6: `routines` deposu eklendi (alışkanlıklardan oluşan
  * sıralı rutinler) — aktif çalıştırma durumu ayrı bir store DEĞİL, `meta`
  * altında (`routineRun` anahtarıyla) saklanır, çünkü Pomodoro'nun canlı sayaç
- * durumu gibi yalnızca yerel/geçicidir.
+ * durumu gibi yalnızca yerel/geçicidir. v7: `inboxNotes` deposu eklendi
+ * (hızlı yakalama / gelen kutusu).
  */
-const DB_VERSION = 6;
-const STORES = ['habits', 'logs', 'pomoSessions', 'journal', 'ratings', 'agenda', 'goals', 'categories', 'categoryBudgets', 'routines', 'meta', 'outbox'] as const;
+const DB_VERSION = 7;
+const STORES = ['habits', 'logs', 'pomoSessions', 'journal', 'ratings', 'agenda', 'goals', 'categories', 'categoryBudgets', 'routines', 'inboxNotes', 'meta', 'outbox'] as const;
 /** `replaceAll` bu depoları TEMİZLEMEZ — outbox'ı bir yedek geri yükleme silmemeli (bekleyen senkron kaybolmasın). */
 const REPLACE_ALL_STORES = STORES.filter((s) => s !== 'outbox');
 
@@ -234,6 +248,7 @@ export class IndexedDbStorage implements Storage {
         if (!db.objectStoreNames.contains('categories')) db.createObjectStore('categories', { keyPath: 'id' });
         if (!db.objectStoreNames.contains('categoryBudgets')) db.createObjectStore('categoryBudgets', { keyPath: 'categoryId' });
         if (!db.objectStoreNames.contains('routines')) db.createObjectStore('routines', { keyPath: 'id' });
+        if (!db.objectStoreNames.contains('inboxNotes')) db.createObjectStore('inboxNotes', { keyPath: 'id' });
         if (!db.objectStoreNames.contains('outbox')) db.createObjectStore('outbox', { keyPath: 'opId' });
       };
       open.onsuccess = () => resolve(new IndexedDbStorage(open.result));
@@ -247,8 +262,8 @@ export class IndexedDbStorage implements Storage {
   }
 
   async load(): Promise<Snapshot> {
-    const tx = this.db.transaction(['habits', 'logs', 'pomoSessions', 'journal', 'ratings', 'agenda', 'goals', 'categories', 'categoryBudgets', 'routines', 'meta'], 'readonly');
-    const [habits, logs, pomoSessions, journal, ratings, agenda, goals, categories, categoryBudgets, routines, metaRows] = await Promise.all([
+    const tx = this.db.transaction(['habits', 'logs', 'pomoSessions', 'journal', 'ratings', 'agenda', 'goals', 'categories', 'categoryBudgets', 'routines', 'inboxNotes', 'meta'], 'readonly');
+    const [habits, logs, pomoSessions, journal, ratings, agenda, goals, categories, categoryBudgets, routines, inboxNotes, metaRows] = await Promise.all([
       req(tx.objectStore('habits').getAll() as IDBRequest<Habit[]>),
       req(tx.objectStore('logs').getAll() as IDBRequest<DayLog[]>),
       req(tx.objectStore('pomoSessions').getAll() as IDBRequest<PomoSession[]>),
@@ -259,9 +274,10 @@ export class IndexedDbStorage implements Storage {
       req(tx.objectStore('categories').getAll() as IDBRequest<Category[]>),
       req(tx.objectStore('categoryBudgets').getAll() as IDBRequest<CategoryBudget[]>),
       req(tx.objectStore('routines').getAll() as IDBRequest<Routine[]>),
+      req(tx.objectStore('inboxNotes').getAll() as IDBRequest<InboxNote[]>),
       req(tx.objectStore('meta').getAll() as IDBRequest<{ key: string; value: unknown }[]>),
     ]);
-    return { habits, logs, pomoSessions, journal, ratings, agenda, goals, categories, categoryBudgets, routines, meta: Object.fromEntries(metaRows.map((r) => [r.key, r.value])) };
+    return { habits, logs, pomoSessions, journal, ratings, agenda, goals, categories, categoryBudgets, routines, inboxNotes, meta: Object.fromEntries(metaRows.map((r) => [r.key, r.value])) };
   }
 
   async putHabit(h: Habit) {
@@ -392,6 +408,17 @@ export class IndexedDbStorage implements Storage {
     await done(tx);
   }
 
+  async putInboxNote(n: InboxNote) {
+    const tx = this.db.transaction('inboxNotes', 'readwrite');
+    tx.objectStore('inboxNotes').put(n);
+    await done(tx);
+  }
+  async removeInboxNote(id: string) {
+    const tx = this.db.transaction('inboxNotes', 'readwrite');
+    tx.objectStore('inboxNotes').delete(id);
+    await done(tx);
+  }
+
   async putOutboxEntry(entry: OutboxEntry) {
     const tx = this.db.transaction('outbox', 'readwrite');
     tx.objectStore('outbox').put(entry);
@@ -421,6 +448,7 @@ export class IndexedDbStorage implements Storage {
     for (const c of snap.categories) tx.objectStore('categories').put(c);
     for (const b of snap.categoryBudgets) tx.objectStore('categoryBudgets').put(b);
     for (const r of snap.routines) tx.objectStore('routines').put(r);
+    for (const n of snap.inboxNotes) tx.objectStore('inboxNotes').put(n);
     for (const [key, value] of Object.entries(snap.meta)) tx.objectStore('meta').put({ key, value });
     await done(tx);
   }

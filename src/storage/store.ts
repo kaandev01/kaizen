@@ -2,6 +2,7 @@ import { normalizeAgendaItem } from '../core/agenda';
 import type { Backup } from '../core/backup';
 import { ancestorIds, GENERAL_CATEGORY_ID, type Category, type CategoryBudget } from '../core/categories';
 import { toDateKey, type Clock, type DateKey } from '../core/dates';
+import type { InboxNote, InboxNoteConversion } from '../core/inbox';
 import { weekRange } from '../core/periods';
 import { planFor, withRevision } from '../core/plan';
 import * as pomo from '../core/pomodoro';
@@ -55,8 +56,9 @@ export interface Persisted<T> {
  * v5: Rutinler (`routines`) eklendi; aktif çalıştırma durumu (`routineRun`)
  * Pomodoro'nun canlı sayaç durumu gibi yalnızca yerel `meta`de tutulur,
  * şemaya/yedeğe dahil değildir.
+ * v6: Hızlı yakalama / gelen kutusu (`inboxNotes`) eklendi.
  */
-export const SCHEMA_VERSION = 5;
+export const SCHEMA_VERSION = 6;
 
 export interface AppState {
   ready: boolean;
@@ -77,6 +79,8 @@ export interface AppState {
   routines: Routine[];
   /** Aktif rutin çalıştırması — yalnızca yerel, senkronlanmaz (bkz. `core/routines.ts`). */
   routineRun: RoutineRunState | null;
+  /** Hızlı yakalama notları — dönüştürülmüş olanlar da (geri alma için) burada kalır. */
+  inboxNotes: InboxNote[];
   /** Kaydetme başarısız olduysa kullanıcıya gösterilecek mesaj. */
   persistError: string | null;
   storageKind: Storage['kind'];
@@ -109,6 +113,7 @@ const validGoal = (g: Goal) => !!g && typeof g.id === 'string' && typeof g.title
 const validCategory = (c: Category) => !!c && typeof c.id === 'string' && typeof c.name === 'string';
 const validCategoryBudget = (b: CategoryBudget) => !!b && typeof b.categoryId === 'string' && Array.isArray(b.revisions);
 const validRoutine = (r: Routine) => !!r && typeof r.id === 'string' && typeof r.name === 'string' && Array.isArray(r.steps);
+const validInboxNote = (n: InboxNote) => !!n && typeof n.id === 'string' && typeof n.text === 'string';
 
 /** Bozuk/eksik bir `routineRun` meta değerine karşı korumalı okuma; şekli tutmazsa `null` (rutin akışı sıfırdan başlar). */
 function normalizeRoutineRun(raw: unknown): RoutineRunState | null {
@@ -167,6 +172,7 @@ export class Store {
       categoryBudgets: [],
       routines: [],
       routineRun: null,
+      inboxNotes: [],
       persistError: null,
       storageKind: storage.kind,
     };
@@ -274,8 +280,9 @@ export class Store {
     const categoryBudgets = snap.categoryBudgets.filter(validCategoryBudget);
     const routines = snap.routines.filter(validRoutine);
     const routineRun = normalizeRoutineRun(snap.meta.routineRun);
+    const inboxNotes = snap.inboxNotes.filter(validInboxNote);
 
-    this.state = { ...this.state, ready: true, habits, logs, settings, pomodoro, pomoSessions, journal, ratings, agenda, goals, categories, categoryBudgets, routines, routineRun };
+    this.state = { ...this.state, ready: true, habits, logs, settings, pomodoro, pomoSessions, journal, ratings, agenda, goals, categories, categoryBudgets, routines, routineRun, inboxNotes };
     // Uygulama kapalıyken biten aşamayı tamamla (tam bir kez).
     this.pomoSettle();
     this.listeners.forEach((l) => l());
@@ -693,6 +700,68 @@ export class Store {
     return summary;
   }
 
+  // ---- Hızlı yakalama / gelen kutusu -------------------------------------------
+  /** Tür/tarih/kategori seçmeden anında bir not bırakır. `addAgendaItem` ile aynı iyimser+geri-alma deseni. */
+  addInboxNote(text: string): Persisted<InboxNote> {
+    const trimmed = text.trim();
+    if (!trimmed) throw new Error('Not boş olamaz.');
+    const now = this.clock.now().getTime();
+    const note: InboxNote = { id: this.genId(), text: trimmed, createdAt: now, updatedAt: now, convertedTo: null };
+    this.set({ inboxNotes: [...this.state.inboxNotes, note] });
+    const saved = this.persist(() => this.storage.putInboxNote(note), { table: 'inbox_notes', op: 'upsert', row: note }).then((ok) => {
+      if (!ok) this.set({ inboxNotes: this.state.inboxNotes.filter((n) => n.id !== note.id) });
+      return ok;
+    });
+    return { item: note, saved };
+  }
+
+  updateInboxNote(id: string, text: string): void {
+    const trimmed = text.trim();
+    if (!trimmed) throw new Error('Not boş olamaz.');
+    const existing = this.state.inboxNotes.find((n) => n.id === id);
+    if (!existing) return;
+    const note: InboxNote = { ...existing, text: trimmed, updatedAt: this.clock.now().getTime() };
+    this.set({ inboxNotes: this.state.inboxNotes.map((n) => (n.id === id ? note : n)) });
+    this.persist(() => this.storage.putInboxNote(note), { table: 'inbox_notes', op: 'upsert', row: note });
+  }
+
+  /** Diğer tüm koleksiyonlarla aynı desen: yerelde hard delete, sunucuda tombstone. */
+  deleteInboxNote(id: string): void {
+    this.set({ inboxNotes: this.state.inboxNotes.filter((n) => n.id !== id) });
+    this.persist(() => this.storage.removeInboxNote(id), { table: 'inbox_notes', op: 'delete', id });
+  }
+
+  /**
+   * Bir notu bir kayda (ajanda/günlük/hedef) dönüştürüldü olarak işaretler.
+   * Hedef kayıt UI tarafından ÖNCE oluşturulmuş olmalı — bu yalnızca ilişkiyi
+   * kurar. Not zaten dönüştürülmüşse NO-OP (idempotent): "tekrar deneme aynı
+   * hedef kaydı ikinci kez oluşturmasın" gereksinimini Store seviyesinde de
+   * garantiler.
+   */
+  convertInboxNote(id: string, target: InboxNoteConversion): void {
+    const existing = this.state.inboxNotes.find((n) => n.id === id);
+    if (!existing || existing.convertedTo) return;
+    const note: InboxNote = { ...existing, convertedTo: target, updatedAt: this.clock.now().getTime() };
+    this.set({ inboxNotes: this.state.inboxNotes.map((n) => (n.id === id ? note : n)) });
+    this.persist(() => this.storage.putInboxNote(note), { table: 'inbox_notes', op: 'upsert', row: note });
+  }
+
+  /**
+   * Bir dönüşümü geri alır: notu tekrar aktif gelen kutusuna döndürür, hangi
+   * hedef kaydın (tür+id) silineceğini döner — o kaydı gerçekten silmek UI'nın
+   * işidir (hangi `deleteX` metodunun çağrılacağını yalnızca UI bilir).
+   * Not zaten dönüştürülmemişse `null` döner.
+   */
+  undoConvertInboxNote(id: string): InboxNoteConversion | null {
+    const existing = this.state.inboxNotes.find((n) => n.id === id);
+    if (!existing?.convertedTo) return null;
+    const target = existing.convertedTo;
+    const note: InboxNote = { ...existing, convertedTo: null, updatedAt: this.clock.now().getTime() };
+    this.set({ inboxNotes: this.state.inboxNotes.map((n) => (n.id === id ? note : n)) });
+    this.persist(() => this.storage.putInboxNote(note), { table: 'inbox_notes', op: 'upsert', row: note });
+    return target;
+  }
+
   // ---- günlük (journal) ------------------------------------------------------
   addJournalEntry(date: DateKey, text: string, source: JournalEntry['source']): JournalEntry {
     const err = validateJournalText(text);
@@ -959,6 +1028,17 @@ export class Store {
     }
   }
 
+  applyRemoteInboxNote(id: string, note: InboxNote | null): void {
+    if (note) {
+      const exists = this.state.inboxNotes.some((n) => n.id === id);
+      this.set({ inboxNotes: exists ? this.state.inboxNotes.map((n) => (n.id === id ? note : n)) : [...this.state.inboxNotes, note] });
+      this.persist(() => this.storage.putInboxNote(note));
+    } else {
+      this.set({ inboxNotes: this.state.inboxNotes.filter((n) => n.id !== id) });
+      this.persist(() => this.storage.removeInboxNote(id));
+    }
+  }
+
   applyRemoteSettings(patch: Partial<Settings>): void {
     const settings = mergeSettings({ ...this.state.settings, ...patch });
     const pomodoro = pomo.applyConfig(this.state.pomodoro, settings.pomodoro);
@@ -997,6 +1077,7 @@ export class Store {
       categories: this.state.categories,
       categoryBudgets: this.state.categoryBudgets,
       routines: this.state.routines,
+      inboxNotes: this.state.inboxNotes,
     };
   }
 
@@ -1026,6 +1107,7 @@ export class Store {
     }
     const categoryBudgets = (data.categoryBudgets ?? []).filter(validCategoryBudget);
     const routines = (data.routines ?? []).filter(validRoutine);
+    const inboxNotes = (data.inboxNotes ?? []).filter(validInboxNote);
 
     await this.flush(); // bekleyen eski yazmalar bitsin, sonra hepsini tek işlemde değiştir
     // Senkron için: değiştirmeden ÖNCEKİ durumu sakla — geri yükleme de (oturum açıksa)
@@ -1040,6 +1122,7 @@ export class Store {
       categories: this.state.categories,
       categoryBudgets: this.state.categoryBudgets,
       routines: this.state.routines,
+      inboxNotes: this.state.inboxNotes,
     };
 
     const snapshot: FullSnapshot = {
@@ -1053,15 +1136,16 @@ export class Store {
       categories,
       categoryBudgets,
       routines,
+      inboxNotes,
       meta: { settings, pomodoro, schemaVersion: SCHEMA_VERSION },
     };
     await this.storage.replaceAll(snapshot);
     // Canlı rutin çalıştırma durumu, Pomodoro sayacı gibi geri yüklenmez (temiz başlar) —
     // yedekteki bir rutin akışının şu an "devam ediyormuş" gibi yorumlanmasını engeller.
-    this.state = { ...this.state, habits, logs, settings, pomodoro, pomoSessions, journal, ratings, agenda, goals, categories, categoryBudgets, routines, routineRun: null, persistError: null };
+    this.state = { ...this.state, habits, logs, settings, pomodoro, pomoSessions, journal, ratings, agenda, goals, categories, categoryBudgets, routines, routineRun: null, inboxNotes, persistError: null };
     this.listeners.forEach((l) => l());
 
-    if (this.syncHook) await this.syncRestoreDiff(prev, { habits, logs, journal, ratings, agenda, goals, categories, categoryBudgets, routines, settings, pomoSessions });
+    if (this.syncHook) await this.syncRestoreDiff(prev, { habits, logs, journal, ratings, agenda, goals, categories, categoryBudgets, routines, inboxNotes, settings, pomoSessions });
   }
 
   /**
@@ -1081,6 +1165,7 @@ export class Store {
       categories: Category[];
       categoryBudgets: CategoryBudget[];
       routines: Routine[];
+      inboxNotes: InboxNote[];
     },
     next: {
       habits: Habit[];
@@ -1092,6 +1177,7 @@ export class Store {
       categories: Category[];
       categoryBudgets: CategoryBudget[];
       routines: Routine[];
+      inboxNotes: InboxNote[];
       settings: Settings;
       pomoSessions: pomo.PomoSession[];
     },
@@ -1151,6 +1237,11 @@ export class Store {
     const nextRoutines = byId(next.routines);
     for (const r of next.routines) await hook({ table: 'routines', op: 'upsert', row: r });
     for (const id of prevRoutines.keys()) if (!nextRoutines.has(id)) await hook({ table: 'routines', op: 'delete', id });
+
+    const prevNotes = byId(prev.inboxNotes);
+    const nextNotes = byId(next.inboxNotes);
+    for (const n of next.inboxNotes) await hook({ table: 'inbox_notes', op: 'upsert', row: n });
+    for (const id of prevNotes.keys()) if (!nextNotes.has(id)) await hook({ table: 'inbox_notes', op: 'delete', id });
 
     await hook({ table: 'user_settings', op: 'upsert', row: next.settings });
     // pomo_sessions değişmez kayıtlardır; zaten var olanlar sunucuda no-op olur.

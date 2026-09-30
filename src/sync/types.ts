@@ -1,4 +1,5 @@
 import type { Category, CategoryBudget } from '../core/categories';
+import type { InboxNote } from '../core/inbox';
 import type { PomoSession } from '../core/pomodoro';
 import type { Routine } from '../core/routines';
 import type { AgendaItem, DayRating, Goal, Habit, JournalEntry, Settings } from '../core/types';
@@ -31,7 +32,9 @@ export type OutboxOp =
   | { table: 'category_budgets'; op: 'upsert'; row: CategoryBudget }
   | { table: 'category_budgets'; op: 'delete'; id: string }
   | { table: 'routines'; op: 'upsert'; row: Routine }
-  | { table: 'routines'; op: 'delete'; id: string };
+  | { table: 'routines'; op: 'delete'; id: string }
+  | { table: 'inbox_notes'; op: 'upsert'; row: InboxNote }
+  | { table: 'inbox_notes'; op: 'delete'; id: string };
 
 /** IndexedDB'deki `outbox` deposunda saklanan kayıt biçimi. */
 export interface OutboxEntry {

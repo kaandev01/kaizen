@@ -11,9 +11,22 @@ const STATUS_OPTIONS: { value: GoalStatus; label: string }[] = [
   { value: 'abandoned', label: 'Vazgeçildi' },
 ];
 
-export function GoalEditor({ goal, period, onClose }: { goal?: Goal; period: GoalPeriod; onClose: () => void }) {
+export function GoalEditor({
+  goal,
+  period,
+  initialTitle,
+  onClose,
+  onSaved,
+}: {
+  goal?: Goal;
+  period: GoalPeriod;
+  /** Yalnızca oluşturma modunda tohum değeri olarak kullanılır (ör. Gelen Kutusu'ndan dönüştürme). */
+  initialTitle?: string;
+  onClose: () => void;
+  onSaved?: (goal: Goal) => void;
+}) {
   const store = useStore();
-  const [title, setTitle] = useState(goal?.title ?? '');
+  const [title, setTitle] = useState(goal?.title ?? initialTitle ?? '');
   const [description, setDescription] = useState(goal?.description ?? '');
   const [status, setStatus] = useState<GoalStatus>(goal?.status ?? 'active');
   const [error, setError] = useState<string | null>(null);
@@ -27,10 +40,11 @@ export function GoalEditor({ goal, period, onClose }: { goal?: Goal; period: Goa
     if (err) return setError(err);
     try {
       if (goal) {
-        store.updateGoal(goal.id, input, effectivePeriod);
+        const updated = store.updateGoal(goal.id, input, effectivePeriod);
         if (goal.status !== status) store.setGoalStatus(goal.id, status);
+        onSaved?.(updated);
       } else {
-        store.addGoal(input, effectivePeriod);
+        onSaved?.(store.addGoal(input, effectivePeriod));
       }
       onClose();
     } catch (e) {

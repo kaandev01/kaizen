@@ -40,6 +40,7 @@ function currentSummary(state: ReturnType<typeof useAppState>): BackupSummary {
     categories: state.categories.length,
     categoryBudgets: state.categoryBudgets.length,
     routines: state.routines.length,
+    inboxNotes: state.inboxNotes.length,
   };
 }
 
@@ -54,6 +55,7 @@ const SUMMARY_LABELS: [keyof BackupSummary, string][] = [
   ['categories', 'kategori'],
   ['categoryBudgets', 'kategori bütçesi'],
   ['routines', 'rutin'],
+  ['inboxNotes', 'gelen kutusu notu'],
 ];
 
 function download(filename: string, mime: string, text: string) {
