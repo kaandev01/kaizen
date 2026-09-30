@@ -3,6 +3,7 @@ import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 import { addDays, dayLong, formatHomeDate, isoWeekday, type DateKey } from '../core/dates';
 import { homeUpcoming } from '../core/agenda';
 import { showUnit } from '../core/format';
+import { activeInboxNotes } from '../core/inbox';
 import { planFor } from '../core/plan';
 import { amountOf, habitsForDay, summarize, type HabitDay } from '../core/progress';
 import { currentStreak } from '../core/streak';
@@ -14,9 +15,12 @@ import { Icon, Ring, Sheet } from './components';
 import { HabitEditor } from './HabitEditor';
 import { useAppState, useStore, useToday } from './hooks';
 import { HabitIcon } from './icons';
+import { InboxSheet } from './InboxSheet';
 import { JournalPanel } from './JournalPanel';
 import { goToAgendaList, goToSettings } from './nav';
 import { cancelHabitNotifications, haptic } from './platform';
+import { RoutineRunSheet } from './RoutineRunSheet';
+import { RoutinesSheet } from './RoutinesSheet';
 
 interface UndoToast {
   habitId: string;
@@ -32,12 +36,16 @@ export function TodayScreen() {
   const [editor, setEditor] = useState<{ habitId?: string } | null>(null);
   const [amountFor, setAmountFor] = useState<string | null>(null);
   const [journalOpen, setJournalOpen] = useState(false);
+  const [addMenuOpen, setAddMenuOpen] = useState(false);
+  const [quickNoteOpen, setQuickNoteOpen] = useState(false);
+  const [inboxOpen, setInboxOpen] = useState(false);
   const [toast, setToast] = useState<UndoToast | null>(null);
   const history = useRef<UndoToast[]>([]); // adım adım geri alma yığını
   const [celebrate, setCelebrate] = useState<string | null>(null);
   const toastTimer = useRef<ReturnType<typeof setTimeout>>();
   const celebrateTimer = useRef<ReturnType<typeof setTimeout>>();
 
+  const pendingInboxCount = useMemo(() => activeInboxNotes(state.inboxNotes).length, [state.inboxNotes]);
   const rows = useMemo(() => habitsForDay(state.habits, state.logs, today), [state.habits, state.logs, today]);
   const summary = summarize(rows);
   const allDone = summary.planned > 0 && summary.completed === summary.planned;
@@ -105,7 +113,7 @@ export function TodayScreen() {
           <button class="round-btn mic-btn" aria-label="Bugüne not ekle (sesle veya yazarak)" onClick={() => setJournalOpen(true)}>
             <Icon name="mic" size={20} />
           </button>
-          <button class="sq-btn" aria-label="Yeni alışkanlık ekle" onClick={() => setEditor({})}>
+          <button class="sq-btn" aria-label="Ekle" onClick={() => setAddMenuOpen(true)}>
             <Icon name="plus" />
           </button>
         </div>
@@ -155,6 +163,7 @@ export function TodayScreen() {
         </>
       )}
 
+      <RoutinesEntry />
       <UpcomingCard />
 
       {toast && (
@@ -183,7 +192,135 @@ export function TodayScreen() {
           <JournalPanel date={today} />
         </Sheet>
       )}
+      {addMenuOpen && (
+        <Sheet title="Ekle" onClose={() => setAddMenuOpen(false)} closeLabel="Kapat">
+          <div class="form">
+            <div class="group">
+              <button
+                class="setting link"
+                onClick={() => {
+                  setAddMenuOpen(false);
+                  setEditor({});
+                }}
+              >
+                <span class="grow">Yeni alışkanlık</span>
+                <Icon name="chevronRight" size={18} />
+              </button>
+              <button
+                class="setting link"
+                onClick={() => {
+                  setAddMenuOpen(false);
+                  setQuickNoteOpen(true);
+                }}
+              >
+                <span class="grow">Hızlı not</span>
+                <Icon name="chevronRight" size={18} />
+              </button>
+              <button
+                class="setting link"
+                onClick={() => {
+                  setAddMenuOpen(false);
+                  setInboxOpen(true);
+                }}
+              >
+                <span class="grow">Gelen Kutusu{pendingInboxCount > 0 ? ` (${pendingInboxCount})` : ''}</span>
+                <Icon name="chevronRight" size={18} />
+              </button>
+            </div>
+          </div>
+        </Sheet>
+      )}
+      {quickNoteOpen && <QuickNoteSheet onClose={() => setQuickNoteOpen(false)} />}
+      {inboxOpen && <InboxSheet onClose={() => setInboxOpen(false)} />}
     </section>
+  );
+}
+
+/**
+ * "+" menüsünden açılan sade hızlı-not paneli: yalnızca metin alanı + Kaydet.
+ * Boş metin kaydedilemez; kalıcı yazma başarısız olursa panel KAPANMAZ,
+ * yazılan metin korunur (`AgendaEditor`'daki `savingRef` çift-dokunma
+ * korumasıyla aynı desen).
+ */
+function QuickNoteSheet({ onClose }: { onClose: () => void }) {
+  const store = useStore();
+  const [text, setText] = useState('');
+  const [error, setError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+  const savingRef = useRef(false);
+
+  const save = async () => {
+    if (savingRef.current || !text.trim()) return;
+    savingRef.current = true;
+    setSaving(true);
+    setError(null);
+    try {
+      const { saved } = store.addInboxNote(text);
+      const ok = await saved;
+      if (!ok) {
+        setError('Kaydedilemedi: cihaza yazılamadı. Yazdıkların korunuyor, tekrar deneyebilirsin.');
+        savingRef.current = false;
+        setSaving(false);
+        return;
+      }
+      onClose();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Kaydedilemedi.');
+      savingRef.current = false;
+      setSaving(false);
+    }
+  };
+
+  return (
+    <Sheet title="Hızlı Not" onClose={onClose} action={{ label: saving ? 'Kaydediliyor…' : 'Kaydet', onClick: save, disabled: saving || !text.trim() }}>
+      <div class="form">
+        <label class="field">
+          <span class="label">Not</span>
+          <textarea class="input journal-textarea" value={text} onInput={(e) => setText(e.currentTarget.value)} />
+        </label>
+        {error && (
+          <p class="error" role="alert">
+            {error}
+          </p>
+        )}
+      </div>
+    </Sheet>
+  );
+}
+
+/**
+ * Ana ekranın kompakt "Rutinler" giriş noktası — birden fazla büyük rutin
+ * kartıyla ekranı doldurmak yerine TEK bir satır: bugün aktif bir çalıştırma
+ * varsa doğrudan devam ettirir ("Sabah rutinim · 2/4"), yoksa rutin listesini
+ * açar (henüz hiç rutin yoksa da, ilk rutini oluşturmak için gösterilmeye
+ * devam eder — `UpcomingCard`'ın aksine bu giriş noktası hiç gizlenmez).
+ */
+function RoutinesEntry() {
+  const { routines, routineRun } = useAppState();
+  const today = useToday();
+  const [sheetOpen, setSheetOpen] = useState<'list' | 'run' | null>(null);
+
+  const activeToday = routineRun?.date === today ? routines.find((r) => r.id === routineRun.routineId) : undefined;
+  const subtitle = activeToday
+    ? `${activeToday.name} · ${routineRun!.currentIndex}/${routineRun!.stepOrder.length}`
+    : routines.length > 0
+      ? `${routines.length} rutin`
+      : 'Henüz rutin yok';
+
+  return (
+    <div class="routines-entry">
+      <div class="group">
+        <button class="setting link" onClick={() => setSheetOpen(activeToday ? 'run' : 'list')}>
+          <span class="grow">
+            <span class="label">Rutinler</span>
+            <span class="strong-text block">{subtitle}</span>
+          </span>
+          <Icon name="chevronRight" size={18} />
+        </button>
+      </div>
+      {sheetOpen === 'list' && <RoutinesSheet onClose={() => setSheetOpen(null)} />}
+      {sheetOpen === 'run' && <RoutineRunSheet onClose={() => setSheetOpen(null)} />}
+    </div>
   );
 }
 

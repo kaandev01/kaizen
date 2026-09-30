@@ -15,7 +15,7 @@ Row Level Security). Mac/Xcode/Apple Developer üyeliği gerekmez.
 ```bash
 npm install          # ilk kurulum
 npm run dev          # geliştirme sunucusu (http://localhost:5173, ağdaki cihazlardan da erişilir)
-npm test             # birim/entegrasyon testleri (145 test)
+npm test             # birim/entegrasyon testleri (190 test)
 npm run typecheck    # TypeScript denetimi
 npm run build        # dist/ klasörüne üretim derlemesi (PWA + service worker dahil)
 npm run icons        # uygulama simgelerini yeniden üretir (scripts/make-icons.mjs)
@@ -28,7 +28,7 @@ Giriş **zorunludur** — uygulama açılışta e-posta/şifre ile giriş/kayıt
 **Kendi Supabase projeni kurman gerekiyor** (ücretsiz plan yeterli). Hiçbir gizli anahtar bu depoya veya sohbete girmez:
 
 1. [supabase.com](https://supabase.com)'da ücretsiz bir proje oluştur.
-2. Proje → **SQL Editor**'de `supabase/migrations/0001_init.sql` dosyasının **tamamını** yapıştırıp çalıştır (tablolar + Row Level Security politikaları + senkron fonksiyonunu tek seferde kurar). **0001'i daha önce çalıştırdıysan**, sırayla şunları da bir kez çalıştır: `0002_pomo_session_review.sql` (Pomodoro değerlendirme özelliğinden önce çalıştırdıysan — `pomo_sessions`'a `rating`/`note` ekler) ve `0003_categories.sql` (Pomodoro kategorileri özelliğinden önce çalıştırdıysan — `categories` tablosunu, `habits.linked_category_id`'yi ve `pomo_sessions.category_id`'yi ekler). Sıfırdan kuruyorsan yalnızca 0001 yeterli (0002 ve 0003'ün içeriğini zaten kapsıyor).
+2. Proje → **SQL Editor**'de `supabase/migrations/0001_init.sql` dosyasının **tamamını** yapıştırıp çalıştır (tablolar + Row Level Security politikaları + senkron fonksiyonunu tek seferde kurar). **0001'i daha önce çalıştırdıysan**, sırayla şunları da bir kez çalıştır: `0002_pomo_session_review.sql` (Pomodoro değerlendirme özelliğinden önce çalıştırdıysan — `pomo_sessions`'a `rating`/`note` ekler), `0003_categories.sql` (Pomodoro kategorileri özelliğinden önce çalıştırdıysan — `categories` tablosunu, `habits.linked_category_id`'yi ve `pomo_sessions.category_id`'yi ekler), `0004_category_budgets.sql` (haftalık zaman bütçesi özelliğinden önce çalıştırdıysan — `category_budgets` tablosunu ekler), `0005_routines.sql` (rutinler özelliğinden önce çalıştırdıysan — `routines` tablosunu ekler) ve `0006_inbox_notes.sql` (hızlı yakalama özelliğinden önce çalıştırdıysan — `inbox_notes` tablosunu ekler). Sıfırdan kuruyorsan yalnızca 0001 yeterli (0002-0006'nın içeriğini zaten kapsıyor). **Çalıştırdıktan sonra**, PostgREST'in şema önbelleğini yenilemek için SQL Editor'de ayrıca `NOTIFY pgrst, 'reload schema';` çalıştırman gerekebilir — yenilenmezse yeni sütun/tablo geçici olarak "bulunamadı" (`PGRST204`) hatası verebilir.
 3. Proje → **Settings → API**'den `Project URL` ve `anon public` anahtarını al.
 4. Yerel geliştirme için: `.env.example`'ı `.env.local` olarak kopyala, iki değeri gir (`.env.local` asla commit edilmez).
 5. Yayınlanan (GitHub Pages) sürüm için: repo → **Settings → Secrets and variables → Actions**'a `VITE_SUPABASE_URL` ve `VITE_SUPABASE_ANON_KEY` olarak ekle (`ci.yml`/`deploy.yml` build adımında okunur).
@@ -95,6 +95,33 @@ asla kategorisiz görünmez.
 - **Analiz (v1, basit):** Odaklan ekranında "Bugün N Pomodoro" satırının altında, bugün en az bir dakikası olan kategoriler süreye göre azalan sırayla listelenir (`categoryStatsForDay`). Bir alt kategoride geçirilen süre, tüm üst kategorilerine de **rollup** olarak yansır — ayrı bir grafik/ekran yok.
 - **Alışkanlık bağlantısı (isteğe bağlı, tek yönlü):** `HabitEditor.tsx`'te bir alışkanlık bir kategoriye bağlanabilir ("Bağlı kategori"). O kategoride **veya herhangi bir alt kategorisinde** bir odak seansı tamamlandığında, bağlı alışkanlık **otomatik ve sessizce** (onay adımı yok) "+1" tiklenir — Bugün ekranındaki manuel dokunuşla birebir aynı mekanizma (`Store.autoTickHabitsForCategory`), streak/halka/bildirim-iptali dahil. Seans sonrası değerlendirme formunda yalnızca bilgi amaçlı küçük bir not gösterilir ("... alışkanlığına otomatik +1 eklendi").
 - Bir kategori silinirse: alt kategorisi varsa silme reddedilir (önce onları taşı/sil); ona bağlı alışkanlıklar **unlink** edilir (alışkanlığın kendisi silinmez); o kategorideki geçmiş seanslar **Genel**'e taşınır (geçmiş asla kaybolmaz).
+
+## Haftalık zaman bütçesi
+
+Odaklan ekranında bir kategorinin içine girildiğinde (kategori seçiciden), o kategori için **haftalık bir süre hedefi** tanımlanabilir (ör. "Ders: haftada 10 saat") — ilerleme çubuğu, kalan süre ve önceki haftanın sonucuyla birlikte gösterilir (`src/ui/CategoryPicker.tsx` → `CategoryBudgetSection`).
+
+- Hedef, `Habit.revisions` ile aynı ilkeyle **haftalara göre sürümlenir** (`CategoryBudget.revisions`, her öğenin `from`'u o haftanın Pazartesi'si): güncel haftanın hedefi değiştirilebilir, geçmiş haftaların hedefi asla değişmez. Hiç düzenlenmeyen gelecek haftalar otomatik olarak son hedefi miras alır. Hedef kaldırılınca (`targetMs: null`) geçmiş revizyonlar silinmez.
+- Gerçek süre, o haftaya düşen tüm Pomodoro seanslarının **rollup** toplamıdır (alt kategorideki süre üst kategoriye de yansır — `categoryStatsForRange`, `categoryStatsForDay`'in genellemesi); mola/duraklama süreleri hiç sayılmaz. Hedef aşılırsa çubuk %100'de sabit kalır, kalan süre negatif gösterilmez.
+- Kategori silinince (mevcut davranış — seansları Genel'e taşınır) o kategoriye ait bütçe kaydı da kaldırılır.
+- Bu, alışkanlık↔kategori otomatik-tik mekanizmasını hiç etkilemez — ayrı, birbirinden bağımsız iki özellik.
+
+## Rutinler
+
+Bugün ekranında kompakt bir **Rutinler** girişi (tek satır, çok sayıda büyük kartla ekranı doldurmaz) — mevcut alışkanlıklardan sıralı bir kontrol listesi oluşturup ("Sabah rutinim": yatağı topla +1, su iç +1 bardak, kitap oku +10 sayfa) adım adım çalıştırabilirsin.
+
+- Rutin oluşturma/düzenleme/silme (`src/ui/RoutineEditor.tsx`) — adımlar yalnızca alışkanlık + miktar taşır, ad/birim her zaman güncel alışkanlıktan okunur (kopya tutulmaz). Aynı alışkanlık bir rutine yalnızca bir kez eklenebilir.
+- Çalıştırma (`src/ui/RoutineRunSheet.tsx`): tek adımı gösteren sade bir ekran — Tamamla/Atla/Rutini bitir, önceki adımı geri alma. Bugün **planlı olmayan** (ya da alışkanlığı silinmiş) adımlar o günkü çalıştırmanın dışında bırakılır. Hedefe kalan miktar adım miktarından azsa yalnızca kalanı eklenir; hedef zaten doluysa "Zaten tamamlandı" gösterilir, tekrar artış uygulanmaz.
+- Adım tamamlama mevcut alışkanlık artırma mekanizmasını (`Store.setAmount`, delta senkron) aynen kullanır — ayrı bir senkron/idempotency mekanizması yoktur. **Geri alma yalnızca o adımın kendi katkısını** geri çevirir; aradaki başka manuel veya Pomodoro artışlarına dokunmaz.
+- Aktif çalıştırma (hangi adımda olunduğu) Pomodoro'nun canlı sayaç durumu gibi **yalnızca cihazda** tutulur, senkronlanmaz ve başka bir cihazda kendiliğinden açılmaz; rutin **tanımları** (ad + adımlar) normal şekilde senkronlanır. Gün değişince yarım kalan bir çalıştırma sessizce bugüne taşınmaz — kullanıcı bugün için yeniden başlatır.
+
+## Hızlı yakalama / gelen kutusu
+
+Bugün ekranındaki **+** düğmesi artık doğrudan alışkanlık formunu açmaz — küçük bir menü açılır: **Yeni alışkanlık**, **Hızlı not**, **Gelen Kutusu** (bekleyen not sayısıyla).
+
+- **Hızlı not**: yalnızca bir metin alanı + Kaydet — tür, tarih ya da kategori seçilmez. Boş metin kaydedilemez; kaydetme başarısız olursa panel kapanmaz, yazılan metin korunur.
+- **Gelen Kutusu**: işlenmemiş notların listesi. Bir nota dokununca düzenle/sil ya da üç türden birine **dönüştür**: Yapılacak/Deadline (`AgendaEditor` not metniyle ön dolu açılır), Hedef (`GoalEditor`, dönem bu fazda güncel aya sabitlenir — sonradan Hedefler ekranından değiştirilebilir) veya Günlük (tarih seçilip doğrudan eklenir).
+- Dönüşüm notu **silmez** — yalnızca hangi kayda (tür + id) dönüştüğünü işaretler (`InboxNote.convertedTo`), böylece güvenle geri alınabilir; kullanıcı formu iptal ederse not hiç değişmeden kalır. Aynı dönüştürme işlemi tekrar tetiklenirse (ör. ağ tekrar denemesi) ikinci bir hedef kayıt **oluşturulmaz** — not zaten dönüştürülmüşse no-op'tur.
+- Elle silme diğer tüm koleksiyonlarla aynı desendedir (yerelde kalıcı silme, sunucuda tombstone).
 
 ## Günlük (yazılı + sesle giriş)
 
@@ -198,7 +225,9 @@ katmanının üzerine kolayca inşa edilebileceği, test edilmiş bir sorgu katm
 | Streak / plan / halka kuralları | `src/core/streak.ts`, `plan.ts`, `progress.ts` |
 | Pomodoro durum makinesi + geçmiş | `src/core/pomodoro.ts`, `pomoStats.ts` |
 | Seans sonrası değerlendirme/not formu | `src/ui/PomoReviewSheet.tsx` |
-| Pomodoro kategorileri (klasör ağacı, rollup) | `src/core/categories.ts`, `src/ui/CategoryPicker.tsx`, `src/ui/palette.ts` |
+| Pomodoro kategorileri (klasör ağacı, rollup) + haftalık zaman bütçesi | `src/core/categories.ts`, `src/ui/CategoryPicker.tsx`, `src/ui/palette.ts` |
+| Rutinler (sıralı alışkanlık kontrol listesi) | `src/core/routines.ts`, `src/ui/RoutinesSheet.tsx`, `RoutineEditor.tsx`, `RoutineRunSheet.tsx` |
+| Hızlı yakalama / gelen kutusu | `src/core/inbox.ts`, `src/ui/InboxSheet.tsx` (+ `AgendaEditor.tsx`/`GoalEditor.tsx`'teki `initialTitle` ön-dolgu propu) |
 | Ajanda mantığı (gecikme, sıralama, hatırlatma) | `src/core/agenda.ts` |
 | Hedef yardımcıları | `src/core/goals.ts` |
 | Dönem/tarih aralığı hesapları | `src/core/periods.ts` |
@@ -208,7 +237,7 @@ katmanının üzerine kolayca inşa edilebileceği, test edilmiş bir sorgu katm
 | Kalıcılık ve şema sürümü | `src/storage/storage.ts`, `store.ts` (`SCHEMA_VERSION`) |
 | Uygulama adı/simgesi | `vite.config.ts` (manifest), `index.html`, `scripts/make-icons.mjs` |
 | Giriş/kayıt ekranı, oturum yönlendirme | `src/ui/AuthScreen.tsx`, `src/ui/Root.tsx` |
-| Bulut şeması + RLS + senkron fonksiyonu | `supabase/migrations/0001_init.sql` (+ `0002_pomo_session_review.sql`, `0003_categories.sql` — yalnızca 0001'i daha önce çalıştırmış olanlar için) |
+| Bulut şeması + RLS + senkron fonksiyonu | `supabase/migrations/0001_init.sql` (+ `0002_pomo_session_review.sql`, `0003_categories.sql`, `0004_category_budgets.sql`, `0005_routines.sql`, `0006_inbox_notes.sql` — yalnızca 0001'i daha önce çalıştırmış olanlar için) |
 | Senkron motoru, yerel↔bulut eşleme, ilk aktarım | `src/sync/engine.ts`, `mapping.ts`, `migrate.ts`, `supabaseClient.ts`, `types.ts` |
 
 ## Tasarım notları (Stitch'ten sapmalar)
@@ -222,7 +251,7 @@ katmanının üzerine kolayca inşa edilebileceği, test edilmiş bir sorgu katm
 - `DayLog`: `(habitId, tarih) → miktar`. Streak, halka ve hatırlatmalar bu kayıtlardan **her seferinde yeniden hesaplanır** (geri alma otomatik yansır).
 - `PomoSession`: `segments` (gerçek çalışma aralıkları) tek kaynak; `activeMs` bunlardan türetilir, gün bazlı dağılım da aynı alandan hesaplanır (`pomoStats.ts`).
 - `DayRating`: `date` birincil anahtar — gün başına tek kayıt; puan silinince kayıt tamamen kaldırılır (asla `score: 0` yazılmaz).
-- **Şema sürümü 3** (`SCHEMA_VERSION`): v1'den yükseltmede eski `meta.pomoHistory` blobu yeni `pomoSessions` deposuna taşınır (veri kaybı yok); o an sürmekte olan bir Pomodoro varsa (canlı, geçici durum) güvenle `idle`'a sıfırlanır — kalıcı geçmiş etkilenmez. Yeni koleksiyonlar (`journal`, `ratings`, `agenda`, `goals`) v1'de hiç yoktu, boş başlar. v2'den v3'e yükseltmede yerleşik "Genel" kategorisi (`categories.ts` → `GENERAL_CATEGORY_ID`) yoksa oluşturulur; kategorisiz eski `PomoSession` kayıtları ona atanır.
+- **Şema sürümü 6** (`SCHEMA_VERSION`): v1'den yükseltmede eski `meta.pomoHistory` blobu yeni `pomoSessions` deposuna taşınır (veri kaybı yok); o an sürmekte olan bir Pomodoro varsa (canlı, geçici durum) güvenle `idle`'a sıfırlanır — kalıcı geçmiş etkilenmez. Yeni koleksiyonlar (`journal`, `ratings`, `agenda`, `goals`) v1'de hiç yoktu, boş başlar. v2'den v3'e yükseltmede yerleşik "Genel" kategorisi (`categories.ts` → `GENERAL_CATEGORY_ID`) yoksa oluşturulur; kategorisiz eski `PomoSession` kayıtları ona atanır. v3'ten v4'e yükseltmede yeni `categoryBudgets` koleksiyonu boş başlar (hiç kimsenin haftalık hedefi yoktu); v4'ten v5'e yükseltmede yeni `routines` koleksiyonu boş başlar (aktif rutin çalıştırması zaten hiç yedeklenmez); v5'ten v6'ya yükseltmede yeni `inboxNotes` koleksiyonu boş başlar.
 - `Store.exportData()` / `parseBackup()` (`src/core/backup.ts`): sürümlü JSON, eski (v1) yedekleri de aynı göç mantığıyla kabul eder. `Store.restoreBackup()` **tüm veriyi** tek bir IndexedDB işleminde (ya hep ya hiç) değiştirir; canlı Pomodoro sayacı asla geri yüklenmez (temiz/idle başlar — geçmişte kalmış bir zaman damgasının "az önce tamamlandı" gibi yorumlanıp sahte kayıt üretmesini engeller).
 
 ## Doğrulama araçları

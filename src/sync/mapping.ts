@@ -3,8 +3,10 @@
  * Bulut şemasının tek doğruluk kaynağı `supabase/migrations/0001_init.sql`'dir;
  * buradaki alan adları onunla birebir eşleşmelidir.
  */
-import { GENERAL_CATEGORY_ID, type Category } from '../core/categories';
+import { GENERAL_CATEGORY_ID, type Category, type CategoryBudget } from '../core/categories';
+import type { InboxNote } from '../core/inbox';
 import type { PomoSession } from '../core/pomodoro';
+import type { Routine } from '../core/routines';
 import type { AgendaItem, DayRating, Goal, Habit, JournalEntry, Settings } from '../core/types';
 
 // ---- push: yerel tip -> Supabase satırı ----------------------------------
@@ -85,6 +87,41 @@ export function categoryToRow(userId: string, c: Category) {
     color: c.color,
     order: c.order,
     created_at: c.createdAt,
+    deleted_at: null,
+  };
+}
+
+export function categoryBudgetToRow(userId: string, b: CategoryBudget) {
+  return {
+    category_id: b.categoryId,
+    user_id: userId,
+    revisions: b.revisions,
+    updated_at: b.updatedAt,
+    deleted_at: null,
+  };
+}
+
+export function routineToRow(userId: string, r: Routine) {
+  return {
+    id: r.id,
+    user_id: userId,
+    name: r.name,
+    steps: r.steps,
+    order: r.order,
+    created_at: r.createdAt,
+    updated_at: r.updatedAt,
+    deleted_at: null,
+  };
+}
+
+export function inboxNoteToRow(userId: string, n: InboxNote) {
+  return {
+    id: n.id,
+    user_id: userId,
+    text: n.text,
+    converted_to: n.convertedTo,
+    created_at: n.createdAt,
+    updated_at: n.updatedAt,
     deleted_at: null,
   };
 }
@@ -255,6 +292,55 @@ export const categoryFromRow = (r: CategoryRow): Category => ({
   color: r.color,
   order: r.order,
   createdAt: r.created_at,
+});
+
+export interface CategoryBudgetRow {
+  category_id: string;
+  revisions: CategoryBudget['revisions'];
+  updated_at: number;
+  deleted_at: string | null;
+  server_updated_at: string;
+}
+export const categoryBudgetFromRow = (r: CategoryBudgetRow): CategoryBudget => ({
+  categoryId: r.category_id,
+  revisions: Array.isArray(r.revisions) ? r.revisions : [],
+  updatedAt: r.updated_at,
+});
+
+export interface RoutineRow {
+  id: string;
+  name: string;
+  steps: Routine['steps'];
+  order: number;
+  created_at: number;
+  updated_at: number;
+  deleted_at: string | null;
+  server_updated_at: string;
+}
+export const routineFromRow = (r: RoutineRow): Routine => ({
+  id: r.id,
+  name: r.name,
+  steps: Array.isArray(r.steps) ? r.steps : [],
+  order: r.order,
+  createdAt: r.created_at,
+  updatedAt: r.updated_at,
+});
+
+export interface InboxNoteRow {
+  id: string;
+  text: string;
+  converted_to: InboxNote['convertedTo'];
+  created_at: number;
+  updated_at: number;
+  deleted_at: string | null;
+  server_updated_at: string;
+}
+export const inboxNoteFromRow = (r: InboxNoteRow): InboxNote => ({
+  id: r.id,
+  text: r.text,
+  convertedTo: r.converted_to ?? null,
+  createdAt: r.created_at,
+  updatedAt: r.updated_at,
 });
 
 export interface SettingsRow {

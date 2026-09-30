@@ -1,10 +1,13 @@
 import { normalizeAgendaItem } from '../core/agenda';
 import type { Backup } from '../core/backup';
-import { ancestorIds, GENERAL_CATEGORY_ID, type Category } from '../core/categories';
+import { ancestorIds, GENERAL_CATEGORY_ID, type Category, type CategoryBudget } from '../core/categories';
 import { toDateKey, type Clock, type DateKey } from '../core/dates';
-import { withRevision } from '../core/plan';
+import type { InboxNote, InboxNoteConversion } from '../core/inbox';
+import { weekRange } from '../core/periods';
+import { planFor, withRevision } from '../core/plan';
 import * as pomo from '../core/pomodoro';
 import { amountOf, type LogMap } from '../core/progress';
+import { hasDuplicateHabit, stepsPlannedToday, type Routine, type RoutineRunState, type RoutineStepAction } from '../core/routines';
 import {
   DEFAULT_SETTINGS,
   logKey,
@@ -48,8 +51,14 @@ export interface Persisted<T> {
  * v3: Pomodoro kategorileri (klasör sistemi) eklendi; yerleşik "Genel"
  * kategorisi `init()` içinde bir kez oluşturulur, eski Pomodoro kayıtları
  * ona atanır (`pomo.normalizePomoSession`).
+ * v4: Kategori başına haftalık zaman bütçesi (`categoryBudgets`) eklendi;
+ * eski kullanıcılarda bu koleksiyon boş başlar (hiç kimsenin hedefi yoktu).
+ * v5: Rutinler (`routines`) eklendi; aktif çalıştırma durumu (`routineRun`)
+ * Pomodoro'nun canlı sayaç durumu gibi yalnızca yerel `meta`de tutulur,
+ * şemaya/yedeğe dahil değildir.
+ * v6: Hızlı yakalama / gelen kutusu (`inboxNotes`) eklendi.
  */
-export const SCHEMA_VERSION = 3;
+export const SCHEMA_VERSION = 6;
 
 export interface AppState {
   ready: boolean;
@@ -65,6 +74,13 @@ export interface AppState {
   goals: Goal[];
   /** Pomodoro kategorileri (klasör sistemi) — "Genel" her zaman vardır. */
   categories: Category[];
+  /** Kategori başına en fazla bir kayıt; yoksa haftalık hedef tanımlanmamış demektir. */
+  categoryBudgets: CategoryBudget[];
+  routines: Routine[];
+  /** Aktif rutin çalıştırması — yalnızca yerel, senkronlanmaz (bkz. `core/routines.ts`). */
+  routineRun: RoutineRunState | null;
+  /** Hızlı yakalama notları — dönüştürülmüş olanlar da (geri alma için) burada kalır. */
+  inboxNotes: InboxNote[];
   /** Kaydetme başarısız olduysa kullanıcıya gösterilecek mesaj. */
   persistError: string | null;
   storageKind: Storage['kind'];
@@ -95,6 +111,18 @@ const validRating = (r: DayRating) => !!r && typeof r.date === 'string' && isVal
 const validAgendaItem = (a: AgendaItem) => !!a && typeof a.id === 'string' && typeof a.date === 'string' && typeof a.title === 'string';
 const validGoal = (g: Goal) => !!g && typeof g.id === 'string' && typeof g.title === 'string' && !!g.period;
 const validCategory = (c: Category) => !!c && typeof c.id === 'string' && typeof c.name === 'string';
+const validCategoryBudget = (b: CategoryBudget) => !!b && typeof b.categoryId === 'string' && Array.isArray(b.revisions);
+const validRoutine = (r: Routine) => !!r && typeof r.id === 'string' && typeof r.name === 'string' && Array.isArray(r.steps);
+const validInboxNote = (n: InboxNote) => !!n && typeof n.id === 'string' && typeof n.text === 'string';
+
+/** Bozuk/eksik bir `routineRun` meta değerine karşı korumalı okuma; şekli tutmazsa `null` (rutin akışı sıfırdan başlar). */
+function normalizeRoutineRun(raw: unknown): RoutineRunState | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const r = raw as RoutineRunState;
+  if (typeof r.runId !== 'string' || typeof r.routineId !== 'string' || typeof r.date !== 'string') return null;
+  if (!Array.isArray(r.stepOrder) || !Array.isArray(r.actions) || typeof r.currentIndex !== 'number') return null;
+  return r;
+}
 
 /** `linkedCategoryId` şemaya sonradan eklendi — eski kayıtlarda yoktur. */
 function normalizeHabit(h: Habit): Habit {
@@ -141,6 +169,10 @@ export class Store {
       agenda: [],
       goals: [],
       categories: [],
+      categoryBudgets: [],
+      routines: [],
+      routineRun: null,
+      inboxNotes: [],
       persistError: null,
       storageKind: storage.kind,
     };
@@ -245,8 +277,12 @@ export class Store {
       categories = [...categories, general];
       this.persist(() => this.storage.putCategory(general), { table: 'categories', op: 'upsert', row: general });
     }
+    const categoryBudgets = snap.categoryBudgets.filter(validCategoryBudget);
+    const routines = snap.routines.filter(validRoutine);
+    const routineRun = normalizeRoutineRun(snap.meta.routineRun);
+    const inboxNotes = snap.inboxNotes.filter(validInboxNote);
 
-    this.state = { ...this.state, ready: true, habits, logs, settings, pomodoro, pomoSessions, journal, ratings, agenda, goals, categories };
+    this.state = { ...this.state, ready: true, habits, logs, settings, pomodoro, pomoSessions, journal, ratings, agenda, goals, categories, categoryBudgets, routines, routineRun, inboxNotes };
     // Uygulama kapalıyken biten aşamayı tamamla (tam bir kez).
     this.pomoSettle();
     this.listeners.forEach((l) => l());
@@ -473,8 +509,38 @@ export class Store {
       }
     }
 
+    if (this.state.categoryBudgets.some((b) => b.categoryId === id)) {
+      this.set({ categoryBudgets: this.state.categoryBudgets.filter((b) => b.categoryId !== id) });
+      this.persist(() => this.storage.removeCategoryBudget(id), { table: 'category_budgets', op: 'delete', id });
+    }
+
     this.set({ categories: this.state.categories.filter((c) => c.id !== id) });
     this.persist(() => this.storage.removeCategory(id), { table: 'categories', op: 'delete', id });
+  }
+
+  /**
+   * Bir kategorinin haftalık zaman bütçesini ekler/düzenler/kaldırır
+   * (`targetMs: null` = kaldır). Revizyon her zaman GÜNCEL haftanın
+   * Pazartesi'sinden (`weekRange`) itibaren geçerli olur — `Habit.revisions`
+   * ile aynı ilke: aynı hafta içindeki tekrar düzenlemeler son revizyonu
+   * günceller, geçmiş haftalara ait revizyonlara asla dokunulmaz.
+   */
+  setCategoryBudget(categoryId: string, targetMs: number | null): CategoryBudget {
+    if (targetMs !== null && (!Number.isFinite(targetMs) || targetMs <= 0)) throw new Error('Haftalık hedef pozitif bir süre olmalı.');
+    if (!this.state.categories.some((c) => c.id === categoryId)) throw new Error('Kategori bulunamadı.');
+    const from = weekRange(toDateKey(this.clock.now())).start;
+    const existing = this.state.categoryBudgets.find((b) => b.categoryId === categoryId);
+    const revisions = existing ? existing.revisions.slice() : [];
+    const last = revisions[revisions.length - 1];
+    if (last && last.from >= from) {
+      revisions[revisions.length - 1] = { from: last.from, targetMs };
+    } else {
+      revisions.push({ from, targetMs });
+    }
+    const budget: CategoryBudget = { categoryId, revisions, updatedAt: this.clock.now().getTime() };
+    this.set({ categoryBudgets: existing ? this.state.categoryBudgets.map((b) => (b.categoryId === categoryId ? budget : b)) : [...this.state.categoryBudgets, budget] });
+    this.persist(() => this.storage.putCategoryBudget(budget), { table: 'category_budgets', op: 'upsert', row: budget });
+    return budget;
   }
 
   /**
@@ -497,6 +563,203 @@ export class Store {
       ticked.push(h);
     }
     return ticked;
+  }
+
+  // ---- Rutinler (alışkanlıklardan oluşan sıralı kontrol listesi) ---------------
+  addRoutine(input: { name: string; steps: { habitId: string; amount: number }[] }): Routine {
+    const name = input.name.trim();
+    if (!name) throw new Error('Rutine bir isim ver.');
+    if (input.steps.length === 0) throw new Error('En az bir adım ekle.');
+    if (input.steps.some((s) => !Number.isInteger(s.amount) || s.amount < 1)) throw new Error('Adım miktarı 1 veya daha büyük bir tam sayı olmalı.');
+    if (hasDuplicateHabit(input.steps)) throw new Error('Aynı alışkanlık bir rutine yalnızca bir kez eklenebilir.');
+    const now = this.clock.now().getTime();
+    const routine: Routine = {
+      id: this.genId(),
+      name,
+      steps: input.steps.map((s) => ({ id: this.genId(), habitId: s.habitId, amount: s.amount })),
+      order: this.state.routines.reduce((m, r) => Math.max(m, r.order), -1) + 1,
+      createdAt: now,
+      updatedAt: now,
+    };
+    this.set({ routines: [...this.state.routines, routine] });
+    this.persist(() => this.storage.putRoutine(routine), { table: 'routines', op: 'upsert', row: routine });
+    return routine;
+  }
+
+  updateRoutine(id: string, input: { name: string; steps: { id?: string; habitId: string; amount: number }[] }): Routine {
+    const existing = this.state.routines.find((r) => r.id === id);
+    if (!existing) throw new Error('Rutin bulunamadı.');
+    const name = input.name.trim();
+    if (!name) throw new Error('Rutine bir isim ver.');
+    if (input.steps.length === 0) throw new Error('En az bir adım ekle.');
+    if (input.steps.some((s) => !Number.isInteger(s.amount) || s.amount < 1)) throw new Error('Adım miktarı 1 veya daha büyük bir tam sayı olmalı.');
+    if (hasDuplicateHabit(input.steps)) throw new Error('Aynı alışkanlık bir rutine yalnızca bir kez eklenebilir.');
+    const routine: Routine = {
+      ...existing,
+      name,
+      steps: input.steps.map((s) => ({ id: s.id ?? this.genId(), habitId: s.habitId, amount: s.amount })),
+      updatedAt: this.clock.now().getTime(),
+    };
+    this.set({ routines: this.state.routines.map((r) => (r.id === id ? routine : r)) });
+    this.persist(() => this.storage.putRoutine(routine), { table: 'routines', op: 'upsert', row: routine });
+    return routine;
+  }
+
+  /** Silinen rutin o an çalışıyorsa aktif çalıştırma da sıfırlanır (silinmiş bir rutine referans bırakmaz). */
+  deleteRoutine(id: string): void {
+    this.set({ routines: this.state.routines.filter((r) => r.id !== id) });
+    this.persist(() => this.storage.removeRoutine(id), { table: 'routines', op: 'delete', id });
+    if (this.state.routineRun?.routineId === id) this.clearRoutineRun();
+  }
+
+  private setRoutineRun(run: RoutineRunState | null): void {
+    this.set({ routineRun: run });
+    this.persist(() => this.storage.putMeta('routineRun', run));
+  }
+  private clearRoutineRun(): void {
+    this.setRoutineRun(null);
+  }
+
+  /** Bugün planlı olmayan (ya da alışkanlığı silinmiş) adımlar bu çalıştırmanın dışında bırakılır. */
+  startRoutine(routineId: string): RoutineRunState {
+    const routine = this.state.routines.find((r) => r.id === routineId);
+    if (!routine) throw new Error('Rutin bulunamadı.');
+    const today = toDateKey(this.clock.now());
+    const stepOrder = stepsPlannedToday(routine, this.state.habits, today).map((s) => s.id);
+    const run: RoutineRunState = { runId: this.genId(), routineId, date: today, stepOrder, currentIndex: 0, actions: [] };
+    this.setRoutineRun(run);
+    return run;
+  }
+
+  /** Geçerli adımı (varsa) çözer; rutin/adım/habit silinmişse `null` — çalıştırma bozulmaz, yalnızca bu adım işlenemez. */
+  private currentRoutineStep(): { run: RoutineRunState; routine: Routine; step: { id: string; habitId: string; amount: number }; habit: Habit } | null {
+    const run = this.state.routineRun;
+    if (!run || run.currentIndex >= run.stepOrder.length) return null;
+    const routine = this.state.routines.find((r) => r.id === run.routineId);
+    if (!routine) return null;
+    const stepId = run.stepOrder[run.currentIndex];
+    const step = routine.steps.find((s) => s.id === stepId);
+    if (!step) return null;
+    const habit = this.state.habits.find((h) => h.id === step.habitId);
+    if (!habit) return null;
+    return { run, routine, step, habit };
+  }
+
+  /**
+   * Geçerli adımı tamamlar: hedefe kalan miktar adım miktarından azsa yalnızca
+   * kalanı ekler ("Zaten tamamlandı" ise 0 uygulanır); MEVCUT delta-senkron
+   * mekanizmasını (`setAmount`) kullanır — yeni bir RPC/idempotency mekanizması
+   * gerekmez. Rutin/adım/habit bir şekilde silinmişse (mevcut çalıştırma
+   * bozulmadan) `null` döner.
+   */
+  completeRoutineStep(): { habit: Habit; applied: number } | null {
+    const cur = this.currentRoutineStep();
+    if (!cur) return null;
+    const { run, step, habit } = cur;
+    const prev = amountOf(this.state.logs, habit.id, run.date);
+    const plan = planFor(habit, run.date);
+    const remaining = plan ? Math.max(0, plan.target - prev) : step.amount;
+    const applied = Math.min(step.amount, remaining);
+    if (applied > 0) this.setAmount(habit.id, run.date, prev + applied);
+    const action: RoutineStepAction = { stepId: step.id, habitId: habit.id, date: run.date, kind: 'completed', appliedDelta: applied };
+    this.setRoutineRun({ ...run, currentIndex: run.currentIndex + 1, actions: [...run.actions, action] });
+    return { habit, applied };
+  }
+
+  /** Atlama ilerleme miktarını DEĞİŞTİRMEZ — yalnızca sıradaki adıma geçer. */
+  skipRoutineStep(): void {
+    const cur = this.currentRoutineStep();
+    if (!cur) return;
+    const { run, step } = cur;
+    const action: RoutineStepAction = { stepId: step.id, habitId: step.habitId, date: run.date, kind: 'skipped', appliedDelta: 0 };
+    this.setRoutineRun({ ...run, currentIndex: run.currentIndex + 1, actions: [...run.actions, action] });
+  }
+
+  /**
+   * Son işlemi (tamamlama VEYA atlama, hangisiyse) geri alır. Bir tamamlamaysa
+   * yalnızca O ADIMIN uyguladığı kesin miktarı geri çevirir (`amount - appliedDelta`
+   * değil, "şu anki miktar - appliedDelta") — aradaki başka manuel/Pomodoro
+   * artışlarına dokunmaz.
+   */
+  undoLastRoutineStep(): void {
+    const run = this.state.routineRun;
+    if (!run || run.actions.length === 0) return;
+    const last = run.actions[run.actions.length - 1];
+    if (last.kind === 'completed' && last.appliedDelta > 0) {
+      const prev = amountOf(this.state.logs, last.habitId, last.date);
+      this.setAmount(last.habitId, last.date, prev - last.appliedDelta);
+    }
+    this.setRoutineRun({ ...run, currentIndex: run.currentIndex - 1, actions: run.actions.slice(0, -1) });
+  }
+
+  /** Çalıştırmayı bitirir (son adımda ya da erken) — özet döner, `routineRun`'ı sıfırlar. */
+  finishRoutine(): { total: number; completed: number } {
+    const run = this.state.routineRun;
+    const summary = { total: run?.stepOrder.length ?? 0, completed: run?.actions.filter((a) => a.kind === 'completed').length ?? 0 };
+    this.clearRoutineRun();
+    return summary;
+  }
+
+  // ---- Hızlı yakalama / gelen kutusu -------------------------------------------
+  /** Tür/tarih/kategori seçmeden anında bir not bırakır. `addAgendaItem` ile aynı iyimser+geri-alma deseni. */
+  addInboxNote(text: string): Persisted<InboxNote> {
+    const trimmed = text.trim();
+    if (!trimmed) throw new Error('Not boş olamaz.');
+    const now = this.clock.now().getTime();
+    const note: InboxNote = { id: this.genId(), text: trimmed, createdAt: now, updatedAt: now, convertedTo: null };
+    this.set({ inboxNotes: [...this.state.inboxNotes, note] });
+    const saved = this.persist(() => this.storage.putInboxNote(note), { table: 'inbox_notes', op: 'upsert', row: note }).then((ok) => {
+      if (!ok) this.set({ inboxNotes: this.state.inboxNotes.filter((n) => n.id !== note.id) });
+      return ok;
+    });
+    return { item: note, saved };
+  }
+
+  updateInboxNote(id: string, text: string): void {
+    const trimmed = text.trim();
+    if (!trimmed) throw new Error('Not boş olamaz.');
+    const existing = this.state.inboxNotes.find((n) => n.id === id);
+    if (!existing) return;
+    const note: InboxNote = { ...existing, text: trimmed, updatedAt: this.clock.now().getTime() };
+    this.set({ inboxNotes: this.state.inboxNotes.map((n) => (n.id === id ? note : n)) });
+    this.persist(() => this.storage.putInboxNote(note), { table: 'inbox_notes', op: 'upsert', row: note });
+  }
+
+  /** Diğer tüm koleksiyonlarla aynı desen: yerelde hard delete, sunucuda tombstone. */
+  deleteInboxNote(id: string): void {
+    this.set({ inboxNotes: this.state.inboxNotes.filter((n) => n.id !== id) });
+    this.persist(() => this.storage.removeInboxNote(id), { table: 'inbox_notes', op: 'delete', id });
+  }
+
+  /**
+   * Bir notu bir kayda (ajanda/günlük/hedef) dönüştürüldü olarak işaretler.
+   * Hedef kayıt UI tarafından ÖNCE oluşturulmuş olmalı — bu yalnızca ilişkiyi
+   * kurar. Not zaten dönüştürülmüşse NO-OP (idempotent): "tekrar deneme aynı
+   * hedef kaydı ikinci kez oluşturmasın" gereksinimini Store seviyesinde de
+   * garantiler.
+   */
+  convertInboxNote(id: string, target: InboxNoteConversion): void {
+    const existing = this.state.inboxNotes.find((n) => n.id === id);
+    if (!existing || existing.convertedTo) return;
+    const note: InboxNote = { ...existing, convertedTo: target, updatedAt: this.clock.now().getTime() };
+    this.set({ inboxNotes: this.state.inboxNotes.map((n) => (n.id === id ? note : n)) });
+    this.persist(() => this.storage.putInboxNote(note), { table: 'inbox_notes', op: 'upsert', row: note });
+  }
+
+  /**
+   * Bir dönüşümü geri alır: notu tekrar aktif gelen kutusuna döndürür, hangi
+   * hedef kaydın (tür+id) silineceğini döner — o kaydı gerçekten silmek UI'nın
+   * işidir (hangi `deleteX` metodunun çağrılacağını yalnızca UI bilir).
+   * Not zaten dönüştürülmemişse `null` döner.
+   */
+  undoConvertInboxNote(id: string): InboxNoteConversion | null {
+    const existing = this.state.inboxNotes.find((n) => n.id === id);
+    if (!existing?.convertedTo) return null;
+    const target = existing.convertedTo;
+    const note: InboxNote = { ...existing, convertedTo: null, updatedAt: this.clock.now().getTime() };
+    this.set({ inboxNotes: this.state.inboxNotes.map((n) => (n.id === id ? note : n)) });
+    this.persist(() => this.storage.putInboxNote(note), { table: 'inbox_notes', op: 'upsert', row: note });
+    return target;
   }
 
   // ---- günlük (journal) ------------------------------------------------------
@@ -741,6 +1004,41 @@ export class Store {
     }
   }
 
+  applyRemoteCategoryBudget(categoryId: string, budget: CategoryBudget | null): void {
+    if (budget) {
+      const exists = this.state.categoryBudgets.some((b) => b.categoryId === categoryId);
+      this.set({ categoryBudgets: exists ? this.state.categoryBudgets.map((b) => (b.categoryId === categoryId ? budget : b)) : [...this.state.categoryBudgets, budget] });
+      this.persist(() => this.storage.putCategoryBudget(budget));
+    } else {
+      this.set({ categoryBudgets: this.state.categoryBudgets.filter((b) => b.categoryId !== categoryId) });
+      this.persist(() => this.storage.removeCategoryBudget(categoryId));
+    }
+  }
+
+  /** Silinen bir rutin o an çalışıyorsa aktif çalıştırma da sıfırlanır. */
+  applyRemoteRoutine(id: string, routine: Routine | null): void {
+    if (routine) {
+      const exists = this.state.routines.some((r) => r.id === id);
+      this.set({ routines: exists ? this.state.routines.map((r) => (r.id === id ? routine : r)) : [...this.state.routines, routine] });
+      this.persist(() => this.storage.putRoutine(routine));
+    } else {
+      this.set({ routines: this.state.routines.filter((r) => r.id !== id) });
+      this.persist(() => this.storage.removeRoutine(id));
+      if (this.state.routineRun?.routineId === id) this.clearRoutineRun();
+    }
+  }
+
+  applyRemoteInboxNote(id: string, note: InboxNote | null): void {
+    if (note) {
+      const exists = this.state.inboxNotes.some((n) => n.id === id);
+      this.set({ inboxNotes: exists ? this.state.inboxNotes.map((n) => (n.id === id ? note : n)) : [...this.state.inboxNotes, note] });
+      this.persist(() => this.storage.putInboxNote(note));
+    } else {
+      this.set({ inboxNotes: this.state.inboxNotes.filter((n) => n.id !== id) });
+      this.persist(() => this.storage.removeInboxNote(id));
+    }
+  }
+
   applyRemoteSettings(patch: Partial<Settings>): void {
     const settings = mergeSettings({ ...this.state.settings, ...patch });
     const pomodoro = pomo.applyConfig(this.state.pomodoro, settings.pomodoro);
@@ -777,6 +1075,9 @@ export class Store {
       agenda: this.state.agenda,
       goals: this.state.goals,
       categories: this.state.categories,
+      categoryBudgets: this.state.categoryBudgets,
+      routines: this.state.routines,
+      inboxNotes: this.state.inboxNotes,
     };
   }
 
@@ -804,6 +1105,9 @@ export class Store {
     if (!categories.some((c) => c.id === GENERAL_CATEGORY_ID)) {
       categories = [...categories, { id: GENERAL_CATEGORY_ID, name: 'Genel', parentId: null, color: '#5a4bcf', order: 0, createdAt: this.clock.now().getTime() }];
     }
+    const categoryBudgets = (data.categoryBudgets ?? []).filter(validCategoryBudget);
+    const routines = (data.routines ?? []).filter(validRoutine);
+    const inboxNotes = (data.inboxNotes ?? []).filter(validInboxNote);
 
     await this.flush(); // bekleyen eski yazmalar bitsin, sonra hepsini tek işlemde değiştir
     // Senkron için: değiştirmeden ÖNCEKİ durumu sakla — geri yükleme de (oturum açıksa)
@@ -816,6 +1120,9 @@ export class Store {
       agenda: this.state.agenda,
       goals: this.state.goals,
       categories: this.state.categories,
+      categoryBudgets: this.state.categoryBudgets,
+      routines: this.state.routines,
+      inboxNotes: this.state.inboxNotes,
     };
 
     const snapshot: FullSnapshot = {
@@ -827,13 +1134,18 @@ export class Store {
       agenda,
       goals,
       categories,
+      categoryBudgets,
+      routines,
+      inboxNotes,
       meta: { settings, pomodoro, schemaVersion: SCHEMA_VERSION },
     };
     await this.storage.replaceAll(snapshot);
-    this.state = { ...this.state, habits, logs, settings, pomodoro, pomoSessions, journal, ratings, agenda, goals, categories, persistError: null };
+    // Canlı rutin çalıştırma durumu, Pomodoro sayacı gibi geri yüklenmez (temiz başlar) —
+    // yedekteki bir rutin akışının şu an "devam ediyormuş" gibi yorumlanmasını engeller.
+    this.state = { ...this.state, habits, logs, settings, pomodoro, pomoSessions, journal, ratings, agenda, goals, categories, categoryBudgets, routines, routineRun: null, inboxNotes, persistError: null };
     this.listeners.forEach((l) => l());
 
-    if (this.syncHook) await this.syncRestoreDiff(prev, { habits, logs, journal, ratings, agenda, goals, categories, settings, pomoSessions });
+    if (this.syncHook) await this.syncRestoreDiff(prev, { habits, logs, journal, ratings, agenda, goals, categories, categoryBudgets, routines, inboxNotes, settings, pomoSessions });
   }
 
   /**
@@ -843,7 +1155,18 @@ export class Store {
    * her yerde aynı tek tekilleştirme/birleştirme kuralı geçerli kalsın diye.
    */
   private async syncRestoreDiff(
-    prev: { habits: Habit[]; logs: LogMap; journal: JournalEntry[]; ratings: Record<DateKey, DayRating>; agenda: AgendaItem[]; goals: Goal[]; categories: Category[] },
+    prev: {
+      habits: Habit[];
+      logs: LogMap;
+      journal: JournalEntry[];
+      ratings: Record<DateKey, DayRating>;
+      agenda: AgendaItem[];
+      goals: Goal[];
+      categories: Category[];
+      categoryBudgets: CategoryBudget[];
+      routines: Routine[];
+      inboxNotes: InboxNote[];
+    },
     next: {
       habits: Habit[];
       logs: LogMap;
@@ -852,6 +1175,9 @@ export class Store {
       agenda: AgendaItem[];
       goals: Goal[];
       categories: Category[];
+      categoryBudgets: CategoryBudget[];
+      routines: Routine[];
+      inboxNotes: InboxNote[];
       settings: Settings;
       pomoSessions: pomo.PomoSession[];
     },
@@ -901,6 +1227,21 @@ export class Store {
     const nextCategories = byId(next.categories);
     for (const c of next.categories) await hook({ table: 'categories', op: 'upsert', row: c });
     for (const id of prevCategories.keys()) if (!nextCategories.has(id)) await hook({ table: 'categories', op: 'delete', id });
+
+    const prevBudgets = new Map(prev.categoryBudgets.map((b) => [b.categoryId, b]));
+    const nextBudgets = new Map(next.categoryBudgets.map((b) => [b.categoryId, b]));
+    for (const b of next.categoryBudgets) await hook({ table: 'category_budgets', op: 'upsert', row: b });
+    for (const id of prevBudgets.keys()) if (!nextBudgets.has(id)) await hook({ table: 'category_budgets', op: 'delete', id });
+
+    const prevRoutines = byId(prev.routines);
+    const nextRoutines = byId(next.routines);
+    for (const r of next.routines) await hook({ table: 'routines', op: 'upsert', row: r });
+    for (const id of prevRoutines.keys()) if (!nextRoutines.has(id)) await hook({ table: 'routines', op: 'delete', id });
+
+    const prevNotes = byId(prev.inboxNotes);
+    const nextNotes = byId(next.inboxNotes);
+    for (const n of next.inboxNotes) await hook({ table: 'inbox_notes', op: 'upsert', row: n });
+    for (const id of prevNotes.keys()) if (!nextNotes.has(id)) await hook({ table: 'inbox_notes', op: 'delete', id });
 
     await hook({ table: 'user_settings', op: 'upsert', row: next.settings });
     // pomo_sessions değişmez kayıtlardır; zaten var olanlar sunucuda no-op olur.

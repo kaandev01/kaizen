@@ -1,5 +1,7 @@
-import type { Category } from './categories';
+import type { Category, CategoryBudget } from './categories';
+import type { InboxNote } from './inbox';
 import { migrateLegacyPomoHistory, type PomoSession, type PomoState } from './pomodoro';
+import type { Routine } from './routines';
 import type { AgendaItem, DayLog, DayRating, Goal, Habit, JournalEntry, Settings } from './types';
 
 /** Dışa aktarılan/geri yüklenen tüm veri. Sürüm bilgisi taşır (bkz. `parseBackup`). */
@@ -17,6 +19,9 @@ export interface Backup {
   agenda: AgendaItem[];
   goals: Goal[];
   categories: Category[];
+  categoryBudgets: CategoryBudget[];
+  routines: Routine[];
+  inboxNotes: InboxNote[];
 }
 
 export interface BackupSummary {
@@ -28,6 +33,9 @@ export interface BackupSummary {
   agenda: number;
   goals: number;
   categories: number;
+  categoryBudgets: number;
+  routines: number;
+  inboxNotes: number;
 }
 
 export type ParseResult = { ok: true; data: Backup; summary: BackupSummary } | { ok: false; error: string };
@@ -45,6 +53,9 @@ function summarize(d: Backup): BackupSummary {
     agenda: d.agenda.length,
     goals: d.goals.length,
     categories: d.categories.length,
+    categoryBudgets: d.categoryBudgets.length,
+    routines: d.routines.length,
+    inboxNotes: d.inboxNotes.length,
   };
 }
 
@@ -78,6 +89,21 @@ export function parseBackup(raw: unknown, currentSchemaVersion: number): ParseRe
   // restoreBackup()'unda garanti edilir, burada yalnızca boş dizi olarak kabul edilir.
   if ((r.schemaVersion as number) < 3) {
     if (!Array.isArray(r.categories)) r.categories = [];
+    r.schemaVersion = 3; // ARA sürüm — v3→v4 bloğunun kendi denetimi doğru çalışsın diye currentSchemaVersion'a ATLANMAZ
+  }
+  // v3 → v4: kategori başına haftalık zaman bütçesi bu yedekte hiç yoktu.
+  if ((r.schemaVersion as number) < 4) {
+    if (!Array.isArray(r.categoryBudgets)) r.categoryBudgets = [];
+    r.schemaVersion = 4; // ARA sürüm — v4→v5 bloğunun kendi denetimi doğru çalışsın diye currentSchemaVersion'a ATLANMAZ
+  }
+  // v4 → v5: rutinler bu yedekte hiç yoktu. (Aktif rutin çalıştırması zaten hiç yedeklenmez.)
+  if ((r.schemaVersion as number) < 5) {
+    if (!Array.isArray(r.routines)) r.routines = [];
+    r.schemaVersion = 5; // ARA sürüm — v5→v6 bloğunun kendi denetimi doğru çalışsın diye currentSchemaVersion'a ATLANMAZ
+  }
+  // v5 → v6: hızlı yakalama / gelen kutusu notları bu yedekte hiç yoktu.
+  if ((r.schemaVersion as number) < 6) {
+    if (!Array.isArray(r.inboxNotes)) r.inboxNotes = [];
     r.schemaVersion = currentSchemaVersion;
   }
   if (!isArr(r.habits) || !r.habits.every((h) => hasStringId(h) && Array.isArray((h as Habit).revisions))) {
@@ -94,6 +120,9 @@ export function parseBackup(raw: unknown, currentSchemaVersion: number): ParseRe
     ['agenda', 'ajanda'],
     ['goals', 'hedef'],
     ['categories', 'kategori'],
+    ['categoryBudgets', 'kategori bütçesi'],
+    ['routines', 'rutin'],
+    ['inboxNotes', 'gelen kutusu notu'],
   ] as const) {
     if (!isArr(r[key])) return { ok: false, error: `Yedek dosyasındaki ${label} verisi bozuk.` };
   }

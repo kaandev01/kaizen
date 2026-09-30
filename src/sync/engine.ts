@@ -10,6 +10,8 @@ import type { Storage } from '../storage/storage';
 import {
   agendaFromRow,
   agendaToRow,
+  categoryBudgetFromRow,
+  categoryBudgetToRow,
   categoryFromRow,
   categoryToRow,
   dayLogFromRow,
@@ -19,20 +21,27 @@ import {
   habitToRow,
   journalFromRow,
   journalToRow,
+  inboxNoteFromRow,
+  inboxNoteToRow,
   pomoSessionFromRow,
   pomoSessionToRow,
   ratingFromRow,
   ratingToRow,
+  routineFromRow,
+  routineToRow,
   settingsFromRow,
   settingsToRow,
   type AgendaRow,
+  type CategoryBudgetRow,
   type CategoryRow,
   type DayLogRow,
   type GoalRow,
   type HabitRow,
+  type InboxNoteRow,
   type JournalRow,
   type PomoSessionRow,
   type RatingRow,
+  type RoutineRow,
   type SettingsRow,
 } from './mapping';
 import { supabase } from './supabaseClient';
@@ -216,6 +225,36 @@ export class SyncEngine {
         }
         return;
       }
+      case 'category_budgets': {
+        if (op.op === 'upsert') {
+          const { error } = await supabase.from('category_budgets').upsert(categoryBudgetToRow(this.userId, op.row));
+          if (error) throw error;
+        } else {
+          const { error } = await supabase.from('category_budgets').update({ deleted_at: nowIso() }).eq('category_id', op.id).eq('user_id', this.userId);
+          if (error) throw error;
+        }
+        return;
+      }
+      case 'routines': {
+        if (op.op === 'upsert') {
+          const { error } = await supabase.from('routines').upsert(routineToRow(this.userId, op.row));
+          if (error) throw error;
+        } else {
+          const { error } = await supabase.from('routines').update({ deleted_at: nowIso() }).eq('id', op.id).eq('user_id', this.userId);
+          if (error) throw error;
+        }
+        return;
+      }
+      case 'inbox_notes': {
+        if (op.op === 'upsert') {
+          const { error } = await supabase.from('inbox_notes').upsert(inboxNoteToRow(this.userId, op.row));
+          if (error) throw error;
+        } else {
+          const { error } = await supabase.from('inbox_notes').update({ deleted_at: nowIso() }).eq('id', op.id).eq('user_id', this.userId);
+          if (error) throw error;
+        }
+        return;
+      }
       case 'user_settings': {
         const { error } = await supabase.from('user_settings').upsert(settingsToRow(this.userId, op.row));
         if (error) throw error;
@@ -254,6 +293,18 @@ export class SyncEngine {
         this.pullTable<CategoryRow>('categories', (r) => {
           if (r.deleted_at) this.store.applyRemoteCategory(r.id, null);
           else this.store.applyRemoteCategory(r.id, categoryFromRow(r));
+        }),
+        this.pullTable<CategoryBudgetRow>('category_budgets', (r) => {
+          if (r.deleted_at) this.store.applyRemoteCategoryBudget(r.category_id, null);
+          else this.store.applyRemoteCategoryBudget(r.category_id, categoryBudgetFromRow(r));
+        }),
+        this.pullTable<RoutineRow>('routines', (r) => {
+          if (r.deleted_at) this.store.applyRemoteRoutine(r.id, null);
+          else this.store.applyRemoteRoutine(r.id, routineFromRow(r));
+        }),
+        this.pullTable<InboxNoteRow>('inbox_notes', (r) => {
+          if (r.deleted_at) this.store.applyRemoteInboxNote(r.id, null);
+          else this.store.applyRemoteInboxNote(r.id, inboxNoteFromRow(r));
         }),
         this.pullTable<PomoSessionRow>('pomo_sessions', (r) => this.store.applyRemotePomoSession(pomoSessionFromRow(r) as PomoSession)),
         this.pullSettings(),
