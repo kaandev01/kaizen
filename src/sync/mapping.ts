@@ -6,7 +6,6 @@
 import { GENERAL_CATEGORY_ID, type Category, type CategoryBudget } from '../core/categories';
 import type { InboxNote } from '../core/inbox';
 import type { PomoSession } from '../core/pomodoro';
-import type { Routine } from '../core/routines';
 import type { AgendaItem, DayRating, Goal, Habit, JournalEntry, Settings } from '../core/types';
 
 // ---- push: yerel tip -> Supabase satırı ----------------------------------
@@ -97,19 +96,6 @@ export function categoryBudgetToRow(userId: string, b: CategoryBudget) {
     user_id: userId,
     revisions: b.revisions,
     updated_at: b.updatedAt,
-    deleted_at: null,
-  };
-}
-
-export function routineToRow(userId: string, r: Routine) {
-  return {
-    id: r.id,
-    user_id: userId,
-    name: r.name,
-    steps: r.steps,
-    order: r.order,
-    created_at: r.createdAt,
-    updated_at: r.updatedAt,
     deleted_at: null,
   };
 }
@@ -304,25 +290,6 @@ export interface CategoryBudgetRow {
 export const categoryBudgetFromRow = (r: CategoryBudgetRow): CategoryBudget => ({
   categoryId: r.category_id,
   revisions: Array.isArray(r.revisions) ? r.revisions : [],
-  updatedAt: r.updated_at,
-});
-
-export interface RoutineRow {
-  id: string;
-  name: string;
-  steps: Routine['steps'];
-  order: number;
-  created_at: number;
-  updated_at: number;
-  deleted_at: string | null;
-  server_updated_at: string;
-}
-export const routineFromRow = (r: RoutineRow): Routine => ({
-  id: r.id,
-  name: r.name,
-  steps: Array.isArray(r.steps) ? r.steps : [],
-  order: r.order,
-  createdAt: r.created_at,
   updatedAt: r.updated_at,
 });
 

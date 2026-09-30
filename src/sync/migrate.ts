@@ -7,7 +7,7 @@
  */
 import type { Snapshot } from '../storage/storage';
 import { openBestStorage } from '../storage/storage';
-import { agendaToRow, categoryBudgetToRow, categoryToRow, goalToRow, habitToRow, inboxNoteToRow, journalToRow, pomoSessionToRow, ratingToRow, routineToRow } from './mapping';
+import { agendaToRow, categoryBudgetToRow, categoryToRow, goalToRow, habitToRow, inboxNoteToRow, journalToRow, pomoSessionToRow, ratingToRow } from './mapping';
 import { supabase } from './supabaseClient';
 
 export interface LegacySummary {
@@ -20,7 +20,6 @@ export interface LegacySummary {
   goals: number;
   categories: number;
   categoryBudgets: number;
-  routines: number;
   inboxNotes: number;
 }
 
@@ -39,7 +38,6 @@ const summarize = (s: Snapshot): LegacySummary => ({
   goals: s.goals.length,
   categories: s.categories.length,
   categoryBudgets: s.categoryBudgets.length,
-  routines: s.routines.length,
   inboxNotes: s.inboxNotes.length,
 });
 
@@ -96,9 +94,6 @@ export async function importLegacyData(userId: string, snapshot: Snapshot): Prom
   }
   if (snapshot.categoryBudgets.length) {
     jobs.push(supabase.from('category_budgets').upsert(snapshot.categoryBudgets.map((b) => categoryBudgetToRow(userId, b)), { ignoreDuplicates: true }));
-  }
-  if (snapshot.routines.length) {
-    jobs.push(supabase.from('routines').upsert(snapshot.routines.map((r) => routineToRow(userId, r)), { ignoreDuplicates: true }));
   }
   if (snapshot.inboxNotes.length) {
     jobs.push(supabase.from('inbox_notes').upsert(snapshot.inboxNotes.map((n) => inboxNoteToRow(userId, n)), { ignoreDuplicates: true }));
