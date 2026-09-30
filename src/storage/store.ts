@@ -1,7 +1,8 @@
 import { normalizeAgendaItem } from '../core/agenda';
 import type { Backup } from '../core/backup';
-import { ancestorIds, GENERAL_CATEGORY_ID, type Category } from '../core/categories';
+import { ancestorIds, GENERAL_CATEGORY_ID, type Category, type CategoryBudget } from '../core/categories';
 import { toDateKey, type Clock, type DateKey } from '../core/dates';
+import { weekRange } from '../core/periods';
 import { withRevision } from '../core/plan';
 import * as pomo from '../core/pomodoro';
 import { amountOf, type LogMap } from '../core/progress';
@@ -48,8 +49,10 @@ export interface Persisted<T> {
  * v3: Pomodoro kategorileri (klasör sistemi) eklendi; yerleşik "Genel"
  * kategorisi `init()` içinde bir kez oluşturulur, eski Pomodoro kayıtları
  * ona atanır (`pomo.normalizePomoSession`).
+ * v4: Kategori başına haftalık zaman bütçesi (`categoryBudgets`) eklendi;
+ * eski kullanıcılarda bu koleksiyon boş başlar (hiç kimsenin hedefi yoktu).
  */
-export const SCHEMA_VERSION = 3;
+export const SCHEMA_VERSION = 4;
 
 export interface AppState {
   ready: boolean;
@@ -65,6 +68,8 @@ export interface AppState {
   goals: Goal[];
   /** Pomodoro kategorileri (klasör sistemi) — "Genel" her zaman vardır. */
   categories: Category[];
+  /** Kategori başına en fazla bir kayıt; yoksa haftalık hedef tanımlanmamış demektir. */
+  categoryBudgets: CategoryBudget[];
   /** Kaydetme başarısız olduysa kullanıcıya gösterilecek mesaj. */
   persistError: string | null;
   storageKind: Storage['kind'];
@@ -95,6 +100,7 @@ const validRating = (r: DayRating) => !!r && typeof r.date === 'string' && isVal
 const validAgendaItem = (a: AgendaItem) => !!a && typeof a.id === 'string' && typeof a.date === 'string' && typeof a.title === 'string';
 const validGoal = (g: Goal) => !!g && typeof g.id === 'string' && typeof g.title === 'string' && !!g.period;
 const validCategory = (c: Category) => !!c && typeof c.id === 'string' && typeof c.name === 'string';
+const validCategoryBudget = (b: CategoryBudget) => !!b && typeof b.categoryId === 'string' && Array.isArray(b.revisions);
 
 /** `linkedCategoryId` şemaya sonradan eklendi — eski kayıtlarda yoktur. */
 function normalizeHabit(h: Habit): Habit {
@@ -141,6 +147,7 @@ export class Store {
       agenda: [],
       goals: [],
       categories: [],
+      categoryBudgets: [],
       persistError: null,
       storageKind: storage.kind,
     };
@@ -245,8 +252,9 @@ export class Store {
       categories = [...categories, general];
       this.persist(() => this.storage.putCategory(general), { table: 'categories', op: 'upsert', row: general });
     }
+    const categoryBudgets = snap.categoryBudgets.filter(validCategoryBudget);
 
-    this.state = { ...this.state, ready: true, habits, logs, settings, pomodoro, pomoSessions, journal, ratings, agenda, goals, categories };
+    this.state = { ...this.state, ready: true, habits, logs, settings, pomodoro, pomoSessions, journal, ratings, agenda, goals, categories, categoryBudgets };
     // Uygulama kapalıyken biten aşamayı tamamla (tam bir kez).
     this.pomoSettle();
     this.listeners.forEach((l) => l());
@@ -473,8 +481,38 @@ export class Store {
       }
     }
 
+    if (this.state.categoryBudgets.some((b) => b.categoryId === id)) {
+      this.set({ categoryBudgets: this.state.categoryBudgets.filter((b) => b.categoryId !== id) });
+      this.persist(() => this.storage.removeCategoryBudget(id), { table: 'category_budgets', op: 'delete', id });
+    }
+
     this.set({ categories: this.state.categories.filter((c) => c.id !== id) });
     this.persist(() => this.storage.removeCategory(id), { table: 'categories', op: 'delete', id });
+  }
+
+  /**
+   * Bir kategorinin haftalık zaman bütçesini ekler/düzenler/kaldırır
+   * (`targetMs: null` = kaldır). Revizyon her zaman GÜNCEL haftanın
+   * Pazartesi'sinden (`weekRange`) itibaren geçerli olur — `Habit.revisions`
+   * ile aynı ilke: aynı hafta içindeki tekrar düzenlemeler son revizyonu
+   * günceller, geçmiş haftalara ait revizyonlara asla dokunulmaz.
+   */
+  setCategoryBudget(categoryId: string, targetMs: number | null): CategoryBudget {
+    if (targetMs !== null && (!Number.isFinite(targetMs) || targetMs <= 0)) throw new Error('Haftalık hedef pozitif bir süre olmalı.');
+    if (!this.state.categories.some((c) => c.id === categoryId)) throw new Error('Kategori bulunamadı.');
+    const from = weekRange(toDateKey(this.clock.now())).start;
+    const existing = this.state.categoryBudgets.find((b) => b.categoryId === categoryId);
+    const revisions = existing ? existing.revisions.slice() : [];
+    const last = revisions[revisions.length - 1];
+    if (last && last.from >= from) {
+      revisions[revisions.length - 1] = { from: last.from, targetMs };
+    } else {
+      revisions.push({ from, targetMs });
+    }
+    const budget: CategoryBudget = { categoryId, revisions, updatedAt: this.clock.now().getTime() };
+    this.set({ categoryBudgets: existing ? this.state.categoryBudgets.map((b) => (b.categoryId === categoryId ? budget : b)) : [...this.state.categoryBudgets, budget] });
+    this.persist(() => this.storage.putCategoryBudget(budget), { table: 'category_budgets', op: 'upsert', row: budget });
+    return budget;
   }
 
   /**
@@ -741,6 +779,17 @@ export class Store {
     }
   }
 
+  applyRemoteCategoryBudget(categoryId: string, budget: CategoryBudget | null): void {
+    if (budget) {
+      const exists = this.state.categoryBudgets.some((b) => b.categoryId === categoryId);
+      this.set({ categoryBudgets: exists ? this.state.categoryBudgets.map((b) => (b.categoryId === categoryId ? budget : b)) : [...this.state.categoryBudgets, budget] });
+      this.persist(() => this.storage.putCategoryBudget(budget));
+    } else {
+      this.set({ categoryBudgets: this.state.categoryBudgets.filter((b) => b.categoryId !== categoryId) });
+      this.persist(() => this.storage.removeCategoryBudget(categoryId));
+    }
+  }
+
   applyRemoteSettings(patch: Partial<Settings>): void {
     const settings = mergeSettings({ ...this.state.settings, ...patch });
     const pomodoro = pomo.applyConfig(this.state.pomodoro, settings.pomodoro);
@@ -777,6 +826,7 @@ export class Store {
       agenda: this.state.agenda,
       goals: this.state.goals,
       categories: this.state.categories,
+      categoryBudgets: this.state.categoryBudgets,
     };
   }
 
@@ -804,6 +854,7 @@ export class Store {
     if (!categories.some((c) => c.id === GENERAL_CATEGORY_ID)) {
       categories = [...categories, { id: GENERAL_CATEGORY_ID, name: 'Genel', parentId: null, color: '#5a4bcf', order: 0, createdAt: this.clock.now().getTime() }];
     }
+    const categoryBudgets = (data.categoryBudgets ?? []).filter(validCategoryBudget);
 
     await this.flush(); // bekleyen eski yazmalar bitsin, sonra hepsini tek işlemde değiştir
     // Senkron için: değiştirmeden ÖNCEKİ durumu sakla — geri yükleme de (oturum açıksa)
@@ -816,6 +867,7 @@ export class Store {
       agenda: this.state.agenda,
       goals: this.state.goals,
       categories: this.state.categories,
+      categoryBudgets: this.state.categoryBudgets,
     };
 
     const snapshot: FullSnapshot = {
@@ -827,13 +879,14 @@ export class Store {
       agenda,
       goals,
       categories,
+      categoryBudgets,
       meta: { settings, pomodoro, schemaVersion: SCHEMA_VERSION },
     };
     await this.storage.replaceAll(snapshot);
-    this.state = { ...this.state, habits, logs, settings, pomodoro, pomoSessions, journal, ratings, agenda, goals, categories, persistError: null };
+    this.state = { ...this.state, habits, logs, settings, pomodoro, pomoSessions, journal, ratings, agenda, goals, categories, categoryBudgets, persistError: null };
     this.listeners.forEach((l) => l());
 
-    if (this.syncHook) await this.syncRestoreDiff(prev, { habits, logs, journal, ratings, agenda, goals, categories, settings, pomoSessions });
+    if (this.syncHook) await this.syncRestoreDiff(prev, { habits, logs, journal, ratings, agenda, goals, categories, categoryBudgets, settings, pomoSessions });
   }
 
   /**
@@ -843,7 +896,7 @@ export class Store {
    * her yerde aynı tek tekilleştirme/birleştirme kuralı geçerli kalsın diye.
    */
   private async syncRestoreDiff(
-    prev: { habits: Habit[]; logs: LogMap; journal: JournalEntry[]; ratings: Record<DateKey, DayRating>; agenda: AgendaItem[]; goals: Goal[]; categories: Category[] },
+    prev: { habits: Habit[]; logs: LogMap; journal: JournalEntry[]; ratings: Record<DateKey, DayRating>; agenda: AgendaItem[]; goals: Goal[]; categories: Category[]; categoryBudgets: CategoryBudget[] },
     next: {
       habits: Habit[];
       logs: LogMap;
@@ -852,6 +905,7 @@ export class Store {
       agenda: AgendaItem[];
       goals: Goal[];
       categories: Category[];
+      categoryBudgets: CategoryBudget[];
       settings: Settings;
       pomoSessions: pomo.PomoSession[];
     },
@@ -901,6 +955,11 @@ export class Store {
     const nextCategories = byId(next.categories);
     for (const c of next.categories) await hook({ table: 'categories', op: 'upsert', row: c });
     for (const id of prevCategories.keys()) if (!nextCategories.has(id)) await hook({ table: 'categories', op: 'delete', id });
+
+    const prevBudgets = new Map(prev.categoryBudgets.map((b) => [b.categoryId, b]));
+    const nextBudgets = new Map(next.categoryBudgets.map((b) => [b.categoryId, b]));
+    for (const b of next.categoryBudgets) await hook({ table: 'category_budgets', op: 'upsert', row: b });
+    for (const id of prevBudgets.keys()) if (!nextBudgets.has(id)) await hook({ table: 'category_budgets', op: 'delete', id });
 
     await hook({ table: 'user_settings', op: 'upsert', row: next.settings });
     // pomo_sessions değişmez kayıtlardır; zaten var olanlar sunucuda no-op olur.

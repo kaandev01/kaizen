@@ -3,7 +3,7 @@
  * Bulut şemasının tek doğruluk kaynağı `supabase/migrations/0001_init.sql`'dir;
  * buradaki alan adları onunla birebir eşleşmelidir.
  */
-import { GENERAL_CATEGORY_ID, type Category } from '../core/categories';
+import { GENERAL_CATEGORY_ID, type Category, type CategoryBudget } from '../core/categories';
 import type { PomoSession } from '../core/pomodoro';
 import type { AgendaItem, DayRating, Goal, Habit, JournalEntry, Settings } from '../core/types';
 
@@ -85,6 +85,16 @@ export function categoryToRow(userId: string, c: Category) {
     color: c.color,
     order: c.order,
     created_at: c.createdAt,
+    deleted_at: null,
+  };
+}
+
+export function categoryBudgetToRow(userId: string, b: CategoryBudget) {
+  return {
+    category_id: b.categoryId,
+    user_id: userId,
+    revisions: b.revisions,
+    updated_at: b.updatedAt,
     deleted_at: null,
   };
 }
@@ -255,6 +265,19 @@ export const categoryFromRow = (r: CategoryRow): Category => ({
   color: r.color,
   order: r.order,
   createdAt: r.created_at,
+});
+
+export interface CategoryBudgetRow {
+  category_id: string;
+  revisions: CategoryBudget['revisions'];
+  updated_at: number;
+  deleted_at: string | null;
+  server_updated_at: string;
+}
+export const categoryBudgetFromRow = (r: CategoryBudgetRow): CategoryBudget => ({
+  categoryId: r.category_id,
+  revisions: Array.isArray(r.revisions) ? r.revisions : [],
+  updatedAt: r.updated_at,
 });
 
 export interface SettingsRow {

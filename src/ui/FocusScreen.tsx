@@ -163,7 +163,7 @@ export function FocusScreen() {
         {isIOS() ? 'iPhone’da uygulama kapalıyken veya ekran kilitliyken sayaç bildirimi gönderemez; süre dolunca uygulamayı açtığında kalan süre doğru görünür.' : ''}
       </p>
 
-      {categoryPickerOpen && <CategoryPicker selectedId={p.categoryId} onSelect={(id) => store.pomoSetCategory(id ?? GENERAL_CATEGORY_ID)} onClose={() => setCategoryPickerOpen(false)} />}
+      {categoryPickerOpen && <CategoryPicker selectedId={p.categoryId} onSelect={(id) => store.pomoSetCategory(id ?? GENERAL_CATEGORY_ID)} onClose={() => setCategoryPickerOpen(false)} showBudget />}
     </section>
   );
 }
