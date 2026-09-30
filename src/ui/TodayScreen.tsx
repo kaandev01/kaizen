@@ -17,6 +17,8 @@ import { HabitIcon } from './icons';
 import { JournalPanel } from './JournalPanel';
 import { goToAgendaList, goToSettings } from './nav';
 import { cancelHabitNotifications, haptic } from './platform';
+import { RoutineRunSheet } from './RoutineRunSheet';
+import { RoutinesSheet } from './RoutinesSheet';
 
 interface UndoToast {
   habitId: string;
@@ -155,6 +157,7 @@ export function TodayScreen() {
         </>
       )}
 
+      <RoutinesEntry />
       <UpcomingCard />
 
       {toast && (
@@ -184,6 +187,42 @@ export function TodayScreen() {
         </Sheet>
       )}
     </section>
+  );
+}
+
+/**
+ * Ana ekranın kompakt "Rutinler" giriş noktası — birden fazla büyük rutin
+ * kartıyla ekranı doldurmak yerine TEK bir satır: bugün aktif bir çalıştırma
+ * varsa doğrudan devam ettirir ("Sabah rutinim · 2/4"), yoksa rutin listesini
+ * açar (henüz hiç rutin yoksa da, ilk rutini oluşturmak için gösterilmeye
+ * devam eder — `UpcomingCard`'ın aksine bu giriş noktası hiç gizlenmez).
+ */
+function RoutinesEntry() {
+  const { routines, routineRun } = useAppState();
+  const today = useToday();
+  const [sheetOpen, setSheetOpen] = useState<'list' | 'run' | null>(null);
+
+  const activeToday = routineRun?.date === today ? routines.find((r) => r.id === routineRun.routineId) : undefined;
+  const subtitle = activeToday
+    ? `${activeToday.name} · ${routineRun!.currentIndex}/${routineRun!.stepOrder.length}`
+    : routines.length > 0
+      ? `${routines.length} rutin`
+      : 'Henüz rutin yok';
+
+  return (
+    <div class="routines-entry">
+      <div class="group">
+        <button class="setting link" onClick={() => setSheetOpen(activeToday ? 'run' : 'list')}>
+          <span class="grow">
+            <span class="label">Rutinler</span>
+            <span class="strong-text block">{subtitle}</span>
+          </span>
+          <Icon name="chevronRight" size={18} />
+        </button>
+      </div>
+      {sheetOpen === 'list' && <RoutinesSheet onClose={() => setSheetOpen(null)} />}
+      {sheetOpen === 'run' && <RoutineRunSheet onClose={() => setSheetOpen(null)} />}
+    </div>
   );
 }
 
